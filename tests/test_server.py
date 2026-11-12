@@ -2,7 +2,8 @@
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from llama_index.core.workflow import Workflow, StartEvent, StopEvent, step
+from llama_index.core.workflow import StartEvent, StopEvent, Workflow, step
+
 from llama_index.tools.a2a import workflow_as_a2a
 
 
@@ -135,7 +136,9 @@ async def test_empty_input_fails_gracefully():
         assert resp.status_code == 200
         result = resp.json()
         # Should fail gracefully
-        assert "error" in result or result.get("result", {}).get("status", {}).get("state") == "failed"
+        assert (
+            "error" in result or result.get("result", {}).get("status", {}).get("state") == "failed"
+        )
 
 
 @pytest.mark.asyncio

@@ -5,11 +5,9 @@ Provides convenience functions for:
 - Discovering tools from an A2A agent card
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from llama_index.core.tools import FunctionTool
-from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow
-from pydantic import BaseModel
 
 from llama_index.tools.a2a.base import A2AToolSpec
 from llama_index.tools.a2a.client import BasicA2AClient
@@ -17,10 +15,10 @@ from llama_index.tools.a2a.client import BasicA2AClient
 
 def get_tools_from_a2a_card(
     agent_card_url: str,
-    allowed_tools: Optional[List[str]] = None,
-    global_partial_params: Optional[Dict[str, Any]] = None,
-    partial_params_by_tool: Optional[Dict[str, Dict[str, Any]]] = None,
-) -> List[FunctionTool]:
+    allowed_tools: list[str] | None = None,
+    global_partial_params: dict[str, Any] | None = None,
+    partial_params_by_tool: dict[str, dict[str, Any]] | None = None,
+) -> list[FunctionTool]:
     """
     Get tools from an A2A agent card (synchronous).
 
@@ -52,10 +50,10 @@ def get_tools_from_a2a_card(
 
 async def aget_tools_from_a2a_card(
     agent_card_url: str,
-    allowed_tools: Optional[List[str]] = None,
-    global_partial_params: Optional[Dict[str, Any]] = None,
-    partial_params_by_tool: Optional[Dict[str, Dict[str, Any]]] = None,
-) -> List[FunctionTool]:
+    allowed_tools: list[str] | None = None,
+    global_partial_params: dict[str, Any] | None = None,
+    partial_params_by_tool: dict[str, dict[str, Any]] | None = None,
+) -> list[FunctionTool]:
     """
     Get tools from an A2A agent card (asynchronous).
 

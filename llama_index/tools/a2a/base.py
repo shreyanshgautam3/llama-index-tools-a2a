@@ -6,23 +6,25 @@ Mirrors the McpToolSpec pattern from llama-index-tools-mcp.
 
 import asyncio
 import logging
-from typing import Any, Callable, Dict, List, Optional, Set
-
-from pydantic import BaseModel, create_model
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from llama_index.core.tools.function_tool import FunctionTool
 from llama_index.core.tools.tool_spec.base import BaseToolSpec
 from llama_index.core.tools.types import ToolMetadata
+from pydantic import BaseModel, create_model
+
 from llama_index.tools.a2a.tool_spec_mixins import (
-    TypeResolutionMixin,
-    TypeCreationMixin,
     FieldExtractionMixin,
+    TypeCreationMixin,
+    TypeResolutionMixin,
 )
 
+if TYPE_CHECKING:
+    from llama_index.tools.a2a.client import BasicA2AClient
 
-class A2AToolSpec(
-    BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExtractionMixin
-):
+
+class A2AToolSpec(BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExtractionMixin):
     """
     A2AToolSpec converts A2A agent skills to LlamaIndex's FunctionTool objects.
 
@@ -41,9 +43,9 @@ class A2AToolSpec(
     def __init__(
         self,
         client: "BasicA2AClient",  # type: ignore[name-defined]
-        allowed_tools: Optional[List[str]] = None,
-        global_partial_params: Optional[Dict[str, Any]] = None,
-        partial_params_by_tool: Optional[Dict[str, Dict[str, Any]]] = None,
+        allowed_tools: list[str] | None = None,
+        global_partial_params: dict[str, Any] | None = None,
+        partial_params_by_tool: dict[str, dict[str, Any]] | None = None,
         include_capabilities: bool = False,
     ) -> None:
         self.client = client
@@ -53,7 +55,7 @@ class A2AToolSpec(
         self.include_capabilities = include_capabilities
         self.properties_cache = {}
 
-    async def fetch_skills(self) -> List[Any]:
+    async def fetch_skills(self) -> list[Any]:
         """
         Asynchronously get the list of skills from the A2A agent.
 
@@ -81,12 +83,13 @@ class A2AToolSpec(
         Create a tool call function for a specified A2A skill name.
         The function internally wraps the call_skill call to the A2A client.
         """
+
         async def async_tool_fn(**kwargs):
             return await self.client.call_skill(skill_name, kwargs)
 
         return async_tool_fn
 
-    async def to_tool_list_async(self) -> List[FunctionTool]:
+    async def to_tool_list_async(self) -> list[FunctionTool]:
         """
         Asynchronous method to convert A2A skills to FunctionTool objects.
 
@@ -95,7 +98,7 @@ class A2AToolSpec(
 
         """
         skills_list = await self.fetch_skills()
-        function_tool_list: List[FunctionTool] = []
+        function_tool_list: list[FunctionTool] = []
 
         for skill in skills_list:
             fn = self._create_tool_fn(skill.name)
@@ -139,7 +142,7 @@ class A2AToolSpec(
 
         return function_tool_list
 
-    def to_tool_list(self) -> List[FunctionTool]:
+    def to_tool_list(self) -> list[FunctionTool]:
         """
         Synchronous interface: Convert A2A agent skills to FunctionTool objects.
         Note: Use to_tool_list_async instead in asynchronous environments.
@@ -182,9 +185,11 @@ class A2AToolSpec(
         self,
         schema: dict,
         model_name: str,
-        defs: dict = {},
+        defs: dict = None,
     ) -> type[BaseModel]:
         """Create a Pydantic model from a schema."""
+        if defs is None:
+            defs = {}
         if model_name in self.properties_cache:
             return self.properties_cache[model_name]
 
@@ -196,7 +201,7 @@ class A2AToolSpec(
     def remove_model_fields(
         self,
         model: type[BaseModel],
-        fields_to_remove: Set[str],
+        fields_to_remove: set[str],
         model_name: str,
     ) -> type[BaseModel]:
         """Remove specified fields from a Pydantic model."""
@@ -213,6 +218,7 @@ class A2AToolSpec(
 
 def patch_sync(func_async: Callable) -> Callable:
     """Patch an async function to provide a synchronous interface."""
+
     def patched_sync(*args: Any, **kwargs: Any) -> Any:
         try:
             loop = asyncio.get_running_loop()

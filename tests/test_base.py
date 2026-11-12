@@ -1,10 +1,12 @@
 """Tests for the A2A tool spec (outbound skill-to-FunctionTool conversion)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from llama_index.tools.a2a import A2AToolSpec, BasicA2AClient
-from llama_index.tools.a2a.models import AgentCard, Skill, AgentCapabilities, AgentProvider
+
+import pytest
 from llama_index.core.tools import FunctionTool
+
+from llama_index.tools.a2a import A2AToolSpec, BasicA2AClient
+from llama_index.tools.a2a.models import AgentCapabilities, AgentCard, Skill
 
 
 @pytest.mark.asyncio
@@ -14,8 +16,16 @@ async def test_tool_spec_to_tool_list():
         url="http://example.com",
         name="TestAgent",
         skills=[
-            Skill(name="search_web", description="Search the web", input_schema={"type": "object", "properties": {"query": {"type": "string"}}}),
-            Skill(name="calculate", description="Calculate math", input_schema={"type": "object", "properties": {"expr": {"type": "string"}}}),
+            Skill(
+                name="search_web",
+                description="Search the web",
+                input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            ),
+            Skill(
+                name="calculate",
+                description="Calculate math",
+                input_schema={"type": "object", "properties": {"expr": {"type": "string"}}},
+            ),
         ],
         capabilities=AgentCapabilities(streaming=True, push_notifications=False),
     )
@@ -32,7 +42,9 @@ async def test_tool_spec_to_tool_list():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             tool_spec = A2AToolSpec(client)
@@ -66,7 +78,9 @@ async def test_tool_spec_allowed_tools():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             tool_spec = A2AToolSpec(client, allowed_tools=["search_web", "translate"])
@@ -97,14 +111,16 @@ async def test_tool_spec_global_partial_params():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             tool_spec = A2AToolSpec(client, global_partial_params={"api_key": "secret"})
             tools = await tool_spec.to_tool_list_async()
 
             # Call the tool with just the skill-specific arg
-            result = await tools[0].acall(query="test")
+            await tools[0].acall(query="test")
             # The global param should have been added internally
             # (we can't easily verify the internal call, but the tool should work)
 
@@ -129,7 +145,9 @@ async def test_tool_spec_partial_params_by_tool():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             tool_spec = A2AToolSpec(client, partial_params_by_tool={"skill1": {"model": "gpt-4"}})

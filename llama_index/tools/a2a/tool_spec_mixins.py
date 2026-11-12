@@ -5,20 +5,20 @@ Mirrors the MCP tool_spec_mixins.py pattern for converting
 JSON Schema definitions to Pydantic models.
 """
 
-from typing import Any, Dict, List, Union, Literal, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from llama_index.tools.a2a.base import A2AToolSpec
 
 
 # Map JSON Schema types to Python types
-json_type_mapping: Dict[str, Type] = {
+json_type_mapping: dict[str, type] = {
     "string": str,
     "number": float,
     "integer": int,
     "boolean": bool,
-    "object": Dict,
-    "array": List,
+    "object": dict,
+    "array": list,
 }
 
 
@@ -70,10 +70,8 @@ class TypeResolutionMixin:
         defs: dict,
     ) -> Any:
         """Resolve a Union type (anyOf)."""
-        union_types = [
-            self._resolve_union_option(option, defs) for option in schema["anyOf"]
-        ]
-        return Union[tuple(union_types)] if len(union_types) > 1 else union_types[0]
+        union_types = [self._resolve_union_option(option, defs) for option in schema["anyOf"]]
+        return tuple(union_types) if len(union_types) > 1 else union_types[0]
 
     def _resolve_union_option(
         self: "A2AToolSpec",
@@ -111,20 +109,20 @@ class TypeCreationMixin:
     def _create_list_type(self: "A2AToolSpec", schema: dict, defs: dict) -> type:
         """Create a List type from schema."""
         item_type = self._resolve_field_type(schema["items"], defs)
-        return List[item_type]
+        return list[item_type]
 
     def _create_dict_type(self: "A2AToolSpec", schema: dict, defs: dict) -> type:
         """Create a Dict type from schema."""
         additional_props = schema.get("additionalProperties")
 
         if additional_props is False or additional_props is None:
-            return Dict[str, Any]
+            return dict[str, Any]
 
         if isinstance(additional_props, dict):
             value_type = self._resolve_field_type(additional_props, defs)
-            return Dict[str, value_type]
+            return dict[str, value_type]
 
-        return Dict[str, Any]
+        return dict[str, Any]
 
     def _is_simple_array(self: "A2AToolSpec", schema: dict) -> bool:
         """Check if schema is a simple array type."""
@@ -169,7 +167,9 @@ class FieldExtractionMixin:
 
             fields[field_name] = (
                 final_type,
-                __import__("pydantic").Field(default_value, description=field_schema.get("description", "")),
+                __import__("pydantic").Field(
+                    default_value, description=field_schema.get("description", "")
+                ),
             )
 
         return fields

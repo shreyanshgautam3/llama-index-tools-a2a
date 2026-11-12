@@ -5,17 +5,14 @@ Mirrors the BasicMCPClient pattern but adapted for the A2A protocol.
 Handles AgentCard discovery and task-based skill invocation.
 """
 
-import warnings
 import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Callable, AsyncIterator, Awaitable, Any
-from urllib.parse import urlparse
+from typing import Any
 
 import httpx
-from pydantic import AnyUrl
 
-from llama_index.tools.a2a.models import AgentCard, TaskResult, AgentCapabilities, AgentProvider
-
+from llama_index.tools.a2a.models import AgentCard, TaskResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +21,16 @@ class DefaultInMemoryTokenStorage:
     """Simple in-memory token storage for A2A authentication."""
 
     def __init__(self):
-        self._tokens: Optional[dict] = None
-        self._client_info: Optional[dict] = None
+        self._tokens: dict | None = None
+        self._client_info: dict | None = None
 
-    async def get_tokens(self) -> Optional[dict]:
+    async def get_tokens(self) -> dict | None:
         return self._tokens
 
     async def set_tokens(self, tokens: dict) -> None:
         self._tokens = tokens
 
-    async def get_client_info(self) -> Optional[dict]:
+    async def get_client_info(self) -> dict | None:
         return self._client_info
 
     async def set_client_info(self, client_info: dict) -> None:
@@ -60,9 +57,9 @@ class BasicA2AClient:
         self,
         agent_card_url: str,
         timeout: int = 30,
-        headers: Optional[Dict[str, str]] = None,
-        auth: Optional[Any] = None,
-        tool_call_logs_callback: Optional[Callable[[List[str]], Awaitable[Any]]] = None,
+        headers: dict[str, str] | None = None,
+        auth: Any | None = None,
+        tool_call_logs_callback: Callable[[list[str]], Awaitable[Any]] | None = None,
     ):
         self.agent_card_url = agent_card_url
         self.timeout = timeout
@@ -71,8 +68,8 @@ class BasicA2AClient:
         self.tool_call_logs_callback = tool_call_logs_callback
 
         # Cached agent card
-        self._agent_card: Optional[AgentCard] = None
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._agent_card: AgentCard | None = None
+        self._http_client: httpx.AsyncClient | None = None
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         """Get or create an HTTP client with configured timeouts."""
@@ -126,7 +123,7 @@ class BasicA2AClient:
         """
         return await self._discover_agent_card()
 
-    async def list_skills(self) -> List[Any]:
+    async def list_skills(self) -> list[Any]:
         """
         List all available skills on the A2A agent.
 
@@ -141,7 +138,7 @@ class BasicA2AClient:
     async def call_skill(
         self,
         skill_name: str,
-        arguments: Optional[dict] = None,
+        arguments: dict | None = None,
     ) -> TaskResult:
         """
         Call a specific skill on the A2A agent.
@@ -179,22 +176,15 @@ class BasicA2AClient:
                 "task": {
                     "name": skill_name,
                     "input": {
-                        "parts": [
-                            {
-                                "kind": "text",
-                                "text": str(arguments) if arguments else ""
-                            }
-                        ]
-                    }
+                        "parts": [{"kind": "text", "text": str(arguments) if arguments else ""}]
+                    },
                 }
-            }
+            },
         }
 
         # Send the task
         response = await client.post(
-            skill_endpoint,
-            json=request_payload,
-            headers={"Content-Type": "application/json"}
+            skill_endpoint, json=request_payload, headers={"Content-Type": "application/json"}
         )
         response.raise_for_status()
 
@@ -209,7 +199,7 @@ class BasicA2AClient:
     async def send_message(
         self,
         message: str,
-        context_id: Optional[str] = None,
+        context_id: str | None = None,
     ) -> TaskResult:
         """
         Send a natural language message to the agent.
@@ -234,16 +224,14 @@ class BasicA2AClient:
                     "role": "user",
                     "parts": [{"kind": "text", "text": message}],
                 }
-            }
+            },
         }
 
         if context_id:
             request_payload["params"]["contextId"] = context_id
 
         response = await client.post(
-            card.url,
-            json=request_payload,
-            headers={"Content-Type": "application/json"}
+            card.url, json=request_payload, headers={"Content-Type": "application/json"}
         )
         response.raise_for_status()
 

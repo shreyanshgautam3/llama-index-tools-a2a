@@ -9,8 +9,10 @@ Usage:
 """
 
 import argparse
+
 import uvicorn
-from llama_index.core.workflow import Workflow, StartEvent, StopEvent, step
+from llama_index.core.workflow import StartEvent, StopEvent, Workflow, step
+
 from llama_index.tools.a2a import workflow_as_a2a
 
 
@@ -36,15 +38,9 @@ def create_app():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="A2A Server Example")
-    parser.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host to bind to"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8000, help="Port to bind to"
-    )
-    parser.add_argument(
-        "--reload", action="store_true", help="Enable auto-reload"
-    )
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     args = parser.parse_args()
 
     app = create_app()
@@ -53,10 +49,4 @@ if __name__ == "__main__":
     print(f"AgentCard available at http://{args.host}:{args.port}/.well-known/agent-card.json")
     print(f"JSON-RPC endpoint at http://{args.host}:{args.port}/")
 
-    uvicorn.run(
-        app,
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        log_level="info"
-    )
+    uvicorn.run(app, host=args.host, port=args.port, reload=args.reload, log_level="info")

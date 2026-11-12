@@ -1,9 +1,11 @@
 """Tests for the A2A outbound client."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from llama_index.tools.a2a.client import BasicA2AClient
-from llama_index.tools.a2a.models import AgentCard, Skill, Part
+from llama_index.tools.a2a.models import AgentCard, Skill
 
 
 @pytest.mark.asyncio
@@ -18,7 +20,9 @@ async def test_list_skills():
         ],
     )
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
         skills = await client.list_skills()
         assert len(skills) == 2
@@ -48,7 +52,9 @@ async def test_call_skill():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             result = await client.call_skill("my-skill", arguments={"key": "value"})
@@ -75,7 +81,9 @@ async def test_send_message():
         "id": 1,
     }
 
-    with patch.object(BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card):
+    with patch.object(
+        BasicA2AClient, "_discover_agent_card", new_callable=AsyncMock, return_value=mock_card
+    ):
         with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_response)):
             client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
             result = await client.send_message("Hello, agent!")

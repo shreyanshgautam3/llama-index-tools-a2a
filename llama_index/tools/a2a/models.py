@@ -10,72 +10,82 @@ Defines the core data structures used in the A2A (Agent-to-Agent) protocol:
 - TaskResult: Response from skill/task execution
 """
 
-from typing import Any, Dict, List, Optional, Literal
-from pydantic import BaseModel, Field, HttpUrl
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 
 class Part(BaseModel):
     """A single content part within a message or task input/output."""
+
     kind: Literal["text", "file", "image"]
-    text: Optional[str] = None
-    file_uri: Optional[str] = None
-    mime_type: Optional[str] = None
+    text: str | None = None
+    file_uri: str | None = None
+    mime_type: str | None = None
 
 
 class Message(BaseModel):
     """A message exchanged between agents."""
+
     role: Literal["user", "assistant", "system"]
-    parts: List[Part]
-    message_id: Optional[str] = None
-    context_id: Optional[str] = None
+    parts: list[Part]
+    message_id: str | None = None
+    context_id: str | None = None
 
 
 class TaskInput(BaseModel):
     """Input to a task."""
-    parts: List[Part]
+
+    parts: list[Part]
 
 
 class TaskOutput(BaseModel):
     """Output from a task."""
-    parts: List[Part]
-    status: Optional[str] = None
+
+    parts: list[Part]
+    status: str | None = None
 
 
 class Task(BaseModel):
     """A task represents a unit of work to be performed by an agent."""
+
     id: str
     name: str
     input: TaskInput
-    output: Optional[TaskOutput] = None
+    output: TaskOutput | None = None
     status: str = "submitted"
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class Capability(BaseModel):
     """Describes a specific capability an agent offers."""
+
     name: str
-    description: Optional[str] = None
-    input_schema: Optional[Dict[str, Any]] = None
-    output_schema: Optional[Dict[str, Any]] = None
-    tags: Optional[List[str]] = Field(default_factory=list)
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] | None = None
+    tags: list[str] | None = Field(default_factory=list)
 
 
 class Skill(Capability):
     """A named capability that can be invoked by other agents."""
+
     name: str
-    endpoint: Optional[str] = None
-    input_schema: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    output_schema: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    endpoint: str | None = None
+    input_schema: dict[str, Any] | None = Field(default_factory=dict)
+    output_schema: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class AgentCapabilities(BaseModel):
     """Agent capabilities as defined by A2A protocol."""
+
     streaming: bool = False
     push_notifications: bool = False
 
 
 class AgentProvider(BaseModel):
     """Agent provider information."""
+
     organization: str
     url: str
 
@@ -87,39 +97,43 @@ class AgentCard(BaseModel):
 
     Typically served at /.well-known/agent-card.json
     """
+
     url: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     version: str = "1.0.0"
-    skills: List[Skill] = Field(default_factory=list)
-    capabilities: Optional[AgentCapabilities] = None
-    provider: Optional[AgentProvider] = None
-    authentication: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    default_input_modes: Optional[List[str]] = None
-    default_output_modes: Optional[List[str]] = None
-    preferred_transport: Optional[str] = None
-    protocol_version: Optional[str] = None
+    skills: list[Skill] = Field(default_factory=list)
+    capabilities: AgentCapabilities | None = None
+    provider: AgentProvider | None = None
+    authentication: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
+    default_input_modes: list[str] | None = None
+    default_output_modes: list[str] | None = None
+    preferred_transport: str | None = None
+    protocol_version: str | None = None
 
 
 class TaskResult(BaseModel):
     """Result of a task/skill execution."""
+
     task_id: str
-    output: Optional[TaskOutput] = None
-    error: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    output: TaskOutput | None = None
+    error: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class JSONRPCResponse(BaseModel):
     """Standard JSON-RPC 2.0 response."""
+
     jsonrpc: str = "2.0"
-    result: Optional[Any] = None
-    error: Optional[Dict[str, Any]] = None
-    id: Optional[int] = None
+    result: Any | None = None
+    error: dict[str, Any] | None = None
+    id: int | None = None
 
 
 class JSONRPCError(BaseModel):
     """JSON-RPC 2.0 error object."""
+
     code: int
     message: str
-    data: Optional[Any] = None
+    data: Any | None = None

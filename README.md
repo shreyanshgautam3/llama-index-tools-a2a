@@ -3,10 +3,15 @@
 [![PyPI version](https://badge.fury.io/py/llama-index-tools-a2a.svg)](https://badge.fury.io/py/llama-index-tools-a2a)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Support](https://img.shields.io/pypi/pyversions/llama-index-tools-a2a.svg)](https://pypi.org/project/llama-index-tools-a2a/)
+[![Build Status](https://github.com/shreyanshgautam3/llama-index-tools-a2a/actions/workflows/publish.yml/badge.svg)](https://github.com/shreyanshgautam3/llama-index-tools-a2a/actions)
 
 **A2A (Agent-to-Agent) Protocol integration for LlamaIndex**
 
 Enable your LlamaIndex agents to discover and invoke other A2A-compatible agents as tools. Implements Google's A2A protocol specification for universal agent interoperability.
+
+## Why?
+
+Agents are becoming composable building blocks, and the A2A (Agent-to-Agent) protocol is the emerging standard for letting independently built agents discover and call each other. But LlamaIndex agents couldn't participate: there was no way to reach an external A2A agent, and no way to expose a LlamaIndex Workflow to the broader A2A ecosystem. This package closes that gap — turning A2A interoperability into a first-class, importable LlamaIndex tool.
 
 ## Features
 
@@ -58,7 +63,7 @@ result = await agent.chat("What's the weather in Tokyo?")
 # Only use specific skills
 tools = await aget_tools_from_a2a_card(
     "https://agent.example.com/.well-known/agent-card.json",
-    allowed_tools=["search_web", "calculate"]
+    allowed_tools=["search_web", "calculate"],
 )
 ```
 
@@ -68,7 +73,7 @@ tools = await aget_tools_from_a2a_card(
 # Apply default parameters across all tools
 tools = await aget_tools_from_a2a_card(
     "https://agent.example.com/.well-known/agent-card.json",
-    global_partial_params={"api_key": "my-secret-key"}
+    global_partial_params={"api_key": "my-secret-key"},
 )
 ```
 
@@ -78,13 +83,16 @@ tools = await aget_tools_from_a2a_card(
 from llama_index.core.workflow import Workflow, StartEvent, StopEvent, step
 from llama_index.tools.a2a import workflow_as_a2a
 
+
 class MyStartEvent(StartEvent):
     query: str
+
 
 class MyWorkflow(Workflow):
     @step
     async def run(self, start_event: MyStartEvent) -> StopEvent:
         return StopEvent(result=f"Processed: {start_event.query}")
+
 
 # Create the A2A-compatible FastAPI app
 app = workflow_as_a2a(MyWorkflow())
@@ -121,11 +129,8 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
-- **Milestone 1**: Package scaffolded ✅
-- **Milestone 2**: Outbound client with AgentCard discovery ✅
-- **Milestone 3**: Inbound ASGI server (`workflow_as_a2a()`) ✅
-- **Milestone 4**: Integration tests (13 tests passing) ✅
-- **Milestone 5**: Documentation & cookbook ✅
+- **v0.1.0** (2026-11-12): Initial release — Outbound client, inbound server, tool spec conversion, 13 passing tests ✅
+- **v0.1.1** (2026-11-12): PyPI publishing fix — version alignment, CI workflow reliability ✅
 
 ## API Reference
 
@@ -162,3 +167,7 @@ MIT License - see LICENSE file for details.
 
 - Google A2A Team for protocol design and mentorship
 - LlamaIndex community for the MCP integration pattern this builds upon
+
+## Built with
+
+Developed with [Claude Code](https://claude.com/claude-code).

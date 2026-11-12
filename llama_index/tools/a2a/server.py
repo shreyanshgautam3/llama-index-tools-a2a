@@ -6,32 +6,30 @@ Uses the a2a-sdk server components (AgentExecutor, DefaultRequestHandler, etc.)
 to create a FastAPI app that conforms to the A2A protocol.
 """
 
-from typing import Any, Dict, Optional, List, Awaitable, Callable
+from typing import Any
 
-from a2a.types import (
-    AgentCard,
-    AgentSkill,
-    AgentCapabilities,
-    AgentProvider,
-    Part,
-    TextPart,
-    Message,
-    Role,
-    Task,
-    TaskStatus,
-    TaskState,
-    TaskArtifactUpdateEvent,
-    TaskStatusUpdateEvent,
-    Artifact,
-)
+from llama_index.core.workflow import StartEvent, Workflow
+from pydantic import BaseModel
+
 from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from a2a.server.apps import A2AFastAPIApplication
-from pydantic import BaseModel
-
-from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow
+from a2a.types import (
+    AgentCapabilities,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
+    Artifact,
+    Message,
+    Role,
+    TaskArtifactUpdateEvent,
+    TaskState,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+    TextPart,
+)
 
 
 class WorkflowAgentExecutor(AgentExecutor):
@@ -45,14 +43,16 @@ class WorkflowAgentExecutor(AgentExecutor):
     def __init__(
         self,
         workflow: Workflow,
-        start_event_model: Optional[type[BaseModel]] = None,
-        workflow_name: Optional[str] = None,
-        workflow_description: Optional[str] = None,
+        start_event_model: type[BaseModel] | None = None,
+        workflow_name: str | None = None,
+        workflow_description: str | None = None,
     ):
         self.workflow = workflow
         self.start_event_model = start_event_model or workflow._start_event_class
         self.workflow_name = workflow_name or workflow.__class__.__name__
-        self.workflow_description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow"
+        self.workflow_description = (
+            workflow_description or workflow.__doc__ or "LlamaIndex Workflow"
+        )
 
         if self.start_event_model == StartEvent:
             raise ValueError(
@@ -64,28 +64,31 @@ class WorkflowAgentExecutor(AgentExecutor):
         """Execute the workflow, streaming intermediate and final events."""
         user_input = context.get_user_input()
         if not user_input:
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                task_id=context.task_id,
-                context_id=context.context_id,
-                status=TaskStatus(state=TaskState.failed),
-                final=True,
-            ))
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id=context.task_id,
+                    context_id=context.context_id,
+                    status=TaskStatus(state=TaskState.failed),
+                    final=True,
+                )
+            )
             return
 
         try:
             # Parse input into the workflow's StartEvent model
             import json
+
             if isinstance(user_input, str):
                 try:
                     input_data = json.loads(user_input)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
                     # Single-argument workflow
                     fields = self.start_event_model.model_fields
                     if len(fields) == 1:
                         field_name = list(fields.keys())[0]
                         input_data = {field_name: user_input}
                     else:
-                        raise ValueError(f"Expected JSON input, got: {user_input}")
+                        raise ValueError(f"Expected JSON input, got: {user_input}") from e
             elif isinstance(user_input, dict):
                 input_data = user_input
             else:
@@ -104,54 +107,62 @@ class WorkflowAgentExecutor(AgentExecutor):
                 except AttributeError:
                     result_text = str(result)
 
-                await event_queue.enqueue_event(TaskArtifactUpdateEvent(
-                    task_id=context.task_id,
-                    context_id=context.context_id,
-                    artifact=Artifact(
-                        artifact_id=f"{context.task_id}-artifact",
-                        parts=[TextPart(text=result_text)],
-                    ),
-                    last_chunk=True,
-                ))
+                await event_queue.enqueue_event(
+                    TaskArtifactUpdateEvent(
+                        task_id=context.task_id,
+                        context_id=context.context_id,
+                        artifact=Artifact(
+                            artifact_id=f"{context.task_id}-artifact",
+                            parts=[TextPart(text=result_text)],
+                        ),
+                        last_chunk=True,
+                    )
+                )
 
             # Final completion status
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                task_id=context.task_id,
-                context_id=context.context_id,
-                status=TaskStatus(state=TaskState.completed),
-                final=True,
-            ))
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id=context.task_id,
+                    context_id=context.context_id,
+                    status=TaskStatus(state=TaskState.completed),
+                    final=True,
+                )
+            )
 
         except Exception as e:
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                task_id=context.task_id,
-                context_id=context.context_id,
-                status=TaskStatus(
-                    state=TaskState.failed,
-                    message=Message(
-                        messageId=f"{context.task_id}-error",
-                        role=Role.agent,
-                        parts=[TextPart(text=f"Workflow error: {str(e)}")],
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id=context.task_id,
+                    context_id=context.context_id,
+                    status=TaskStatus(
+                        state=TaskState.failed,
+                        message=Message(
+                            messageId=f"{context.task_id}-error",
+                            role=Role.agent,
+                            parts=[TextPart(text=f"Workflow error: {str(e)}")],
+                        ),
                     ),
-                ),
-                final=True,
-            ))
+                    final=True,
+                )
+            )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel the workflow execution."""
-        await event_queue.enqueue_event(TaskStatusUpdateEvent(
-            task_id=context.task_id,
-            context_id=context.context_id,
-            status=TaskStatus(state=TaskState.canceled),
-            final=True,
-        ))
+        await event_queue.enqueue_event(
+            TaskStatusUpdateEvent(
+                task_id=context.task_id,
+                context_id=context.context_id,
+                status=TaskStatus(state=TaskState.canceled),
+                final=True,
+            )
+        )
 
 
 def create_agent_card(
     workflow: Workflow,
-    workflow_name: Optional[str] = None,
-    workflow_description: Optional[str] = None,
-    start_event_model: Optional[type[BaseModel]] = None,
+    workflow_name: str | None = None,
+    workflow_description: str | None = None,
+    start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
 ) -> AgentCard:
@@ -159,12 +170,12 @@ def create_agent_card(
     name = workflow_name or workflow.__class__.__name__
     description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow Agent"
 
-    StartEventCLS = start_event_model or workflow._start_event_class
+    start_event_cls = start_event_model or workflow._start_event_class
 
-    if StartEventCLS != StartEvent:
-        input_schema = StartEventCLS.model_json_schema()
+    if start_event_cls != StartEvent:
+        start_event_cls.model_json_schema()
     else:
-        input_schema = {"type": "object", "properties": {}}
+        pass
 
     skill = AgentSkill(
         id=name.lower().replace(" ", "-"),
@@ -177,7 +188,9 @@ def create_agent_card(
     )
 
     capabilities = AgentCapabilities(streaming=True, push_notifications=False)
-    provider = AgentProvider(organization="LlamaIndex", url="https://github.com/run-llama/llama_index")
+    provider = AgentProvider(
+        organization="LlamaIndex", url="https://github.com/run-llama/llama_index"
+    )
 
     agent_card = AgentCard(
         name=name,
@@ -196,9 +209,9 @@ def create_agent_card(
 
 def workflow_as_a2a(
     workflow: Workflow,
-    workflow_name: Optional[str] = None,
-    workflow_description: Optional[str] = None,
-    start_event_model: Optional[type[BaseModel]] = None,
+    workflow_name: str | None = None,
+    workflow_description: str | None = None,
+    start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
     **app_kwargs: Any,

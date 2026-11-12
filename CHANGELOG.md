@@ -1,6 +1,14 @@
-# Changelog
+## [0.1.1] - 2026-11-12
 
-## [Unreleased] - 2026-11-12
+### Fixed
+- PyPI publishing workflow: version bump to match release tag
+- Test dependencies: pytest-asyncio, fastapi, uvicorn added to dev extras
+
+### Changed
+- Removed `asyncio_mode = "auto"` from pytest config (not needed with pytest-asyncio 1.x)
+- CI workflow uses API token auth for reliable publishing
+
+## [Unreleased]
 
 ### Added
 - **Outbound client**: `BasicA2AClient` for connecting to remote A2A agents
