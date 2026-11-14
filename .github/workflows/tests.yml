@@ -28,4 +28,6 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Test
-        run: pytest -v --tb=long --asyncio-mode=strict
+        run: |
+          pytest -v --tb=long --asyncio-mode=strict --no-header -rA 2>&1 | tee test_output.txt
+          cat test_output.txt
