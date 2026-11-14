@@ -54,3 +54,7 @@ dmypy.json
 # Environment variables
 .env
 .venv/.env
+
+# Understand-Anything knowledge graph data
+.ua/
+.understand-anything/
