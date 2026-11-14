@@ -8,6 +8,16 @@
 - Removed `asyncio_mode = "auto"` from pytest config (not needed with pytest-asyncio 1.x)
 - CI workflow uses API token auth for reliable publishing
 
+## [0.1.2] - 2026-11-14
+
+### Added
+- Test CI workflow (`.github/workflows/tests.yml`) running pytest on Python 3.10/3.11/3.12
+- "Why?" section in README explaining the A2A interoperability problem
+- "Built with Claude Code" footer in README
+
+### Fixed
+- Clean commit history: squashed 6 publish/debug commits into single release commit
+
 ## [Unreleased]
 
 ### Added
