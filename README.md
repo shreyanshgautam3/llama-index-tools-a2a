@@ -157,7 +157,7 @@ python examples/a2a_server.py --port 8000
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
-This project was initially developed as a contribution to the LlamaIndex ecosystem under issue [#24104](https://github.com/run-llama/llama_index/issues/24104) in collaboration with the Google A2A team, and is now maintained as a standalone package per LlamaIndex's integration policy.
+This project was initially developed as a community contribution to the LlamaIndex ecosystem (issue [#24104](https://github.com/run-llama/llama_index/issues/24104)), implementing Google's open A2A protocol specification. It is now maintained as a standalone package per LlamaIndex's integration policy.
 
 ## License
 
@@ -165,7 +165,7 @@ MIT License - see LICENSE file for details.
 
 ## Acknowledgments
 
-- Google A2A Team for protocol design and mentorship
+- Google A2A Team for designing and publishing the open A2A protocol specification
 - LlamaIndex community for the MCP integration pattern this builds upon
 
 ## Built with
