@@ -24,4 +24,4 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Test
-        run: pytest -v --tb=long
+        run: pytest -v --tb=long --asyncio-mode=auto
