@@ -113,12 +113,10 @@ class AgentProvider(BaseModel):
 
 
 class AgentInterface(BaseModel):
-    """Agent interface declaration for v1.0 supportedInterfaces."""
+    """Agent interface declaration for v1.0 additionalInterfaces (a2a-sdk)."""
 
     url: str
-    protocol_binding: Literal["JSONRPC", "GRPC", "HTTP+JSON"]
-    protocol_version: str = "1.0"
-    tenant: str | None = None
+    transport: Literal["JSONRPC", "GRPC", "HTTP+JSON"]
 
 
 class AgentCard(BaseModel):
@@ -147,16 +145,23 @@ class AgentCard(BaseModel):
     url: str | None = None
     preferred_transport: str | None = None
     protocol_version: str | None = None
-    # v1.0 fields
+    # v1.0 fields - a2a-sdk uses additionalInterfaces, wire format also uses additionalInterfaces
+    additional_interfaces: list[AgentInterface] = Field(
+        default_factory=list, alias="additionalInterfaces"
+    )
+    # Alias for backward compatibility - some docs refer to this as supportedInterfaces
     supported_interfaces: list[AgentInterface] = Field(
         default_factory=list, alias="supportedInterfaces"
     )
 
     @property
     def primary_url(self) -> str:
-        """Get the primary URL for the agent (v1.0: first supportedInterface, v0.3: url field)."""
-        if self.supported_interfaces:
-            return self.supported_interfaces[0].url
+        """Get the primary URL for the agent (v1.0: first additionalInterface/
+        supportedInterface, v0.3: url field)."""
+        # Check both field names for v1.0 compatibility
+        interfaces = self.additional_interfaces or self.supported_interfaces
+        if interfaces:
+            return interfaces[0].url
         return self.url or ""
 
 

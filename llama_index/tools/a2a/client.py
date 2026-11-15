@@ -119,9 +119,12 @@ class BasicA2AClient:
         if self._forced_protocol_version:
             self._detected_version = self._forced_protocol_version
         else:
-            # v1.0 has additional_interfaces (a2a-sdk field for supportedInterfaces)
+            # v1.0 has additional_interfaces (a2a-sdk field for additionalInterfaces)
             # v0.3 has url + preferred_transport
-            if getattr(self._agent_card, 'additional_interfaces', None):
+            # Check both field names for compatibility with wire format
+            has_additional = getattr(self._agent_card, 'additional_interfaces', None)
+            has_supported = getattr(self._agent_card, 'supported_interfaces', None)
+            if has_additional or has_supported:
                 self._detected_version = "1.0"
             else:
                 self._detected_version = "0.3"
@@ -131,22 +134,21 @@ class BasicA2AClient:
 
     @property
     def protocol_version(self) -> str:
-        """Get the detected/forced protocol version."""
+        """Get the detected/forced protocol version (synchronous access)."""
+        # Note: this is a sync property. Call get_agent_card() first for reliable detection.
+        return self._detected_version or "0.3"
+
+    async def detect_protocol_version(self) -> str:
+        """Async method to ensure discovery and return protocol version."""
         if self._detected_version is None:
-            # Trigger discovery
-            import asyncio
-            asyncio.create_task(self._discover_agent_card())
+            await self._discover_agent_card()
         return self._detected_version or "0.3"
 
     @property
     def base_url(self) -> str:
         """Get the base URL for API calls."""
         if self._agent_card:
-            # v1.0: use first additional_interface
-            if getattr(self._agent_card, 'additional_interfaces', None):
-                return self._agent_card.additional_interfaces[0].url
-            # v0.3: use url field
-            return self._agent_card.url or ""
+            return self._agent_card.primary_url
         return ""
 
     async def close(self) -> None:
@@ -236,16 +238,25 @@ class BasicA2AClient:
         Args:
             skill_name: The name of the skill to invoke.
             arguments: Optional arguments to pass to the skill.
+                       For v1.0, expected keys: "message" (str), "context_id" (str, optional).
+                       For v0.3, the dict is stringified as task input.
 
         Returns:
             The task result containing the output.
         """
         card = await self._discover_agent_card()
 
-        # Build the input parts
-        input_parts = [Part(kind="text", text=str(arguments) if arguments else "")]
-
         if self.protocol_version == "1.0":
+            # v1.0: Extract message and context_id from arguments
+            # Tool function in base.py passes {"message": message, "context_id": context_id, ...}
+            message_text = ""
+            context_id = None
+            if arguments:
+                message_text = arguments.get("message", "")
+                context_id = arguments.get("context_id")
+
+            input_parts = [Part(kind="text", text=message_text)]
+
             # v1.0: Use SendMessage with message parameter
             params = {
                 "message": Message(
@@ -253,6 +264,9 @@ class BasicA2AClient:
                     parts=input_parts,
                 ).model_dump(exclude_none=True)
             }
+            if context_id:
+                params["contextId"] = context_id
+
             result = await self._send_v1_request("SendMessage", params)
             raw_result = result.get("result", {})
             # v1.0 SendMessage returns either task or message
@@ -270,7 +284,9 @@ class BasicA2AClient:
                 )
             return TaskResult(task_id="")
         else:
-            # v0.3: Use tasks/send
+            # v0.3: Use tasks/send - stringify the entire arguments dict
+            input_parts = [Part(kind="text", text=str(arguments) if arguments else "")]
+
             skill_endpoint = card.url
             for skill in card.skills:
                 if skill.name == skill_name:
@@ -362,19 +378,48 @@ class BasicA2AClient:
         """
         card = await self._discover_agent_card()
 
+        if not task_id:
+            return TaskResult(
+                task_id="",
+                error={"code": -32602, "message": "Invalid task_id: empty string"},
+            )
+
         if self.protocol_version == "1.0":
             result = await self._send_v1_request("GetTask", {"id": task_id})
+            # Check for JSON-RPC error
+            if "error" in result:
+                return TaskResult(
+                    task_id=task_id,
+                    error=result["error"],
+                )
             raw_result = result.get("result", {})
-            task = Task.model_validate(raw_result)
-            return TaskResult(
-                task_id=task.id,
-                output=task.artifacts[0] if task.artifacts else None,
-                metadata=task.metadata,
-            )
+            try:
+                task = Task.model_validate(raw_result)
+                return TaskResult(
+                    task_id=task.id,
+                    output=task.artifacts[0] if task.artifacts else None,
+                    metadata=task.metadata,
+                )
+            except Exception as e:
+                return TaskResult(
+                    task_id=task_id,
+                    error={"code": -32603, "message": f"Failed to parse task result: {e}"},
+                )
         else:
             skill_endpoint = card.url
             result = await self._send_v03_request(skill_endpoint, "tasks/get", {"id": task_id})
+            if "error" in result:
+                return TaskResult(
+                    task_id=task_id,
+                    error=result["error"],
+                )
             raw_result = result.get("result", {})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
-            return TaskResult.model_validate(raw_result)
+            try:
+                return TaskResult.model_validate(raw_result)
+            except Exception as e:
+                return TaskResult(
+                    task_id=task_id,
+                    error={"code": -32603, "message": f"Failed to parse task result: {e}"},
+                )
