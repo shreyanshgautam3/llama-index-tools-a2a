@@ -1,12 +1,36 @@
-## [0.1.1] - 2026-11-12
+## [0.1.3] - 2026-11-15
 
-### Fixed
-- PyPI publishing workflow: version bump to match release tag
-- Test dependencies: pytest-asyncio, fastapi, uvicorn added to dev extras
+### Added
+- **A2A Protocol v1.0 Support**: Dual version support (v0.3 + v1.0) via automatic detection
+  - `BasicA2AClient` now auto-detects protocol version from AgentCard
+  - Sends `A2A-Version: 1.0` header for v1.0 servers
+  - Uses v1.0 JSON-RPC method names (`SendMessage`, `GetTask`) when appropriate
+  - Falls back to v0.3 methods (`message/send`, `tasks/get`, `tasks/send`) for compatibility
+  - New `protocol_version` parameter to force a specific version
+  - New `get_task()` method for retrieving task status (v1.0: `GetTask`, v0.3: `tasks/get`)
+- **Multi-turn conversation support**: `A2AToolSpec.context_id` property for propagating context across tool calls
+- **v1.0 AgentCard models**: `AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`
+- **Inbound server v1.0 support**: `workflow_as_a2a()` now accepts `protocol_version` parameter
+  - Generates `supportedInterfaces[]` for v1.0 cards
+  - Maintains v0.3 format (`url` + `preferred_transport`) for backward compatibility
 
 ### Changed
-- Removed `asyncio_mode = "auto"` from pytest config (not needed with pytest-asyncio 1.x)
-- CI workflow uses API token auth for reliable publishing
+- **Skill-to-tool conversion** (`A2AToolSpec`): Updated to reflect A2A v1.0 reality
+  - Skills no longer require JSON input schemas (per v1.0 spec)
+  - Tools now accept natural language `message` parameter
+  - Structured input should be passed as JSON in message text
+  - Added `context_id` parameter for multi-turn conversations
+- **README**: Added **Limitations** section with 7 known constraints
+- **README**: Updated version history (v0.1.2 first, then v0.1.1)
+- **README**: Corrected "independent implementation" claim (removed unverified Google collaboration)
+- **README**: Added **Protocol Version** section clarifying current v0.3 base with v1.0 support
+- **Examples**: `examples/a2a.ipynb` updated to use `FunctionAgent` (ReActAgent deprecated in LlamaIndex 0.13+)
+- **Test config**: `asyncio_mode = "strict"` in pyproject.toml for CI consistency
+
+### Fixed
+- Client now properly handles v1.0 `SendMessage` response structure (task or message)
+- Server generates valid v1.0 AgentCard with `supportedInterfaces`
+- Tool spec no longer assumes skills have `input_schema` (v1.0 doesn't provide it)
 
 ## [0.1.2] - 2026-11-14
 
@@ -17,6 +41,16 @@
 
 ### Fixed
 - Clean commit history: squashed 6 publish/debug commits into single release commit
+
+## [0.1.1] - 2026-11-12
+
+### Fixed
+- PyPI publishing workflow: version bump to match release tag
+- Test dependencies: pytest-asyncio, fastapi, uvicorn added to dev extras
+
+### Changed
+- Removed `asyncio_mode = "auto"` from pytest config (not needed with pytest-asyncio 1.x)
+- CI workflow uses API token auth for reliable publishing
 
 ## [Unreleased]
 

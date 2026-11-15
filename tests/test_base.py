@@ -119,8 +119,8 @@ async def test_tool_spec_global_partial_params():
             tool_spec = A2AToolSpec(client, global_partial_params={"api_key": "secret"})
             tools = await tool_spec.to_tool_list_async()
 
-            # Call the tool with just the skill-specific arg
-            await tools[0].acall(query="test")
+            # Call the tool with message parameter
+            await tools[0].acall(message="test")
             # The global param should have been added internally
             # (we can't easily verify the internal call, but the tool should work)
 

@@ -4,6 +4,8 @@ Inbound A2A Server - exposes a LlamaIndex Workflow as an A2A agent.
 Mirrors the `workflow_as_mcp` pattern from llama-index-tools-mcp.
 Uses the a2a-sdk server components (AgentExecutor, DefaultRequestHandler, etc.)
 to create a FastAPI app that conforms to the A2A protocol.
+
+Supports both A2A protocol v0.3 and v1.0 via method name handling.
 """
 
 from typing import Any
@@ -165,8 +167,14 @@ def create_agent_card(
     start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
+    protocol_version: str = "1.0",
 ) -> AgentCard:
-    """Create an AgentCard from a LlamaIndex Workflow."""
+    """Create an AgentCard from a LlamaIndex Workflow.
+
+    Args:
+        protocol_version: "0.3" for v0.3 format (url + preferred_transport),
+                          "1.0" for v1.0 format (supportedInterfaces).
+    """
     name = workflow_name or workflow.__class__.__name__
     description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow Agent"
 
@@ -192,17 +200,41 @@ def create_agent_card(
         organization="LlamaIndex", url="https://github.com/run-llama/llama_index"
     )
 
-    agent_card = AgentCard(
-        name=name,
-        description=description,
-        version=version,
-        url=url,
-        skills=[skill],
-        capabilities=capabilities,
-        provider=provider,
-        default_input_modes=["text", "application/json"],
-        default_output_modes=["text", "application/json"],
-    )
+    from a2a.types import AgentInterface as A2AAgentInterface
+
+    if protocol_version == "1.0":
+        # v1.0 format: additional_interfaces (a2a-sdk field name for supportedInterfaces)
+        agent_card = AgentCard(
+            name=name,
+            description=description,
+            version=version,
+            url=url,  # Still included for compatibility
+            skills=[skill],
+            capabilities=capabilities,
+            provider=provider,
+            default_input_modes=["text", "application/json"],
+            default_output_modes=["text", "application/json"],
+            additional_interfaces=[
+                A2AAgentInterface(
+                    transport="JSONRPC",
+                    url=url,
+                )
+            ],
+        )
+    else:
+        # v0.3 format: url + preferred_transport
+        agent_card = AgentCard(
+            name=name,
+            description=description,
+            version=version,
+            url=url,
+            skills=[skill],
+            capabilities=capabilities,
+            provider=provider,
+            default_input_modes=["text", "application/json"],
+            default_output_modes=["text", "application/json"],
+            preferred_transport="JSONRPC",
+        )
 
     return agent_card
 
@@ -214,6 +246,7 @@ def workflow_as_a2a(
     start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
+    protocol_version: str = "1.0",
     **app_kwargs: Any,
 ) -> Any:
     """
@@ -229,6 +262,7 @@ def workflow_as_a2a(
                            Defaults to workflow._start_event_class.
         url: Base URL where the agent will be hosted.
         version: Version string for the agent card.
+        protocol_version: A2A protocol version ("0.3" or "1.0"). Default: "1.0".
         **app_kwargs: Additional kwargs passed to FastAPI constructor.
 
     Returns:
@@ -256,6 +290,7 @@ def workflow_as_a2a(
         start_event_model=start_event_model,
         url=url,
         version=version,
+        protocol_version=protocol_version,
     )
 
     # Create executor

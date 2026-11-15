@@ -1,7 +1,9 @@
 """
 Pydantic models for A2A protocol types.
 
-Defines the core data structures used in the A2A (Agent-to-Agent) protocol:
+Defines the core data structures used in the A2A (Agent-to-Agent) protocol.
+Supports both v0.3 and v1.0 protocol versions.
+
 - AgentCard: Discovery document describing agent capabilities
 - Skill: Individual capability definition
 - Task: Unit of work exchanged between agents
@@ -47,14 +49,34 @@ class TaskOutput(BaseModel):
 
 
 class Task(BaseModel):
-    """A task represents a unit of work to be performed by an agent."""
+    """A task represents a unit of work to be performed by an agent (v1.0)."""
 
     id: str
-    name: str
-    input: TaskInput
-    output: TaskOutput | None = None
-    status: str = "submitted"
+    context_id: str
+    status: "TaskStatus"
+    history: list[Message] = Field(default_factory=list)
+    artifacts: list["Artifact"] | None = None
     metadata: dict[str, Any] | None = Field(default_factory=dict)
+    extensions: dict[str, Any] | None = None
+
+
+class TaskStatus(BaseModel):
+    """Task status in v1.0."""
+
+    state: Literal["submitted", "working", "input-required", "completed", "failed", "canceled"]
+    message: Message | None = None
+    timestamp: str | None = None
+
+
+class Artifact(BaseModel):
+    """Task artifact in v1.0."""
+
+    artifact_id: str
+    parts: list[Part]
+    index: int | None = None
+    append: bool | None = None
+    last_chunk: bool | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class Capability(BaseModel):
@@ -90,15 +112,27 @@ class AgentProvider(BaseModel):
     url: str
 
 
+class AgentInterface(BaseModel):
+    """Agent interface declaration for v1.0 supportedInterfaces."""
+
+    url: str
+    protocol_binding: Literal["JSONRPC", "GRPC", "HTTP+JSON"]
+    protocol_version: str = "1.0"
+    tenant: str | None = None
+
+
 class AgentCard(BaseModel):
     """
     The AgentCard is the discovery document for an A2A agent.
     It describes the agent's identity, capabilities, and endpoints.
 
     Typically served at /.well-known/agent-card.json
+
+    v1.0: Uses supportedInterfaces[] instead of url + preferred_transport
     """
 
-    url: str
+    model_config = {"populate_by_name": True}
+
     name: str
     description: str | None = None
     version: str = "1.0.0"
@@ -109,8 +143,21 @@ class AgentCard(BaseModel):
     metadata: dict[str, Any] | None = Field(default_factory=dict)
     default_input_modes: list[str] | None = None
     default_output_modes: list[str] | None = None
+    # v0.3 fields (kept for backward compatibility)
+    url: str | None = None
     preferred_transport: str | None = None
     protocol_version: str | None = None
+    # v1.0 fields
+    supported_interfaces: list[AgentInterface] = Field(
+        default_factory=list, alias="supportedInterfaces"
+    )
+
+    @property
+    def primary_url(self) -> str:
+        """Get the primary URL for the agent (v1.0: first supportedInterface, v0.3: url field)."""
+        if self.supported_interfaces:
+            return self.supported_interfaces[0].url
+        return self.url or ""
 
 
 class TaskResult(BaseModel):
@@ -120,6 +167,13 @@ class TaskResult(BaseModel):
     output: TaskOutput | None = None
     error: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = Field(default_factory=dict)
+
+
+class SendMessageResult(BaseModel):
+    """Result of SendMessage call (v1.0) - wraps task or message."""
+
+    task: Task | None = None
+    message: Message | None = None
 
 
 class JSONRPCResponse(BaseModel):

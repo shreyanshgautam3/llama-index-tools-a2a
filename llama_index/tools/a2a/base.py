@@ -2,6 +2,11 @@
 A2A Tool Spec - converts A2A agent skills to LlamaIndex FunctionTool objects.
 
 Mirrors the McpToolSpec pattern from llama-index-tools-mcp.
+
+Note: A2A v1.0 skills do not include JSON input schemas (only name,
+description, tags, examples). The tools created here accept natural
+language input and forward it to the A2A agent via SendMessage.
+For structured input, callers should include JSON in the message text.
 """
 
 import asyncio
@@ -31,6 +36,11 @@ class A2AToolSpec(BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExt
     This spec connects to an A2A agent via its AgentCard and exposes
     the agent's capabilities as callable tools within LlamaIndex workflows.
 
+    Each skill becomes one FunctionTool that accepts a natural language message.
+    For structured input, pass JSON in the message text (e.g., '{"topic": "AI", "depth": 3}').
+
+    Supports multi-turn conversations via contextId propagation across tool calls.
+
     Args:
         client: An A2A client instance implementing basic communication methods.
         allowed_tools: If set, only return tools with the specified names.
@@ -54,6 +64,21 @@ class A2AToolSpec(BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExt
         self.partial_params_by_tool = partial_params_by_tool
         self.include_capabilities = include_capabilities
         self.properties_cache = {}
+        self._context_id: str | None = None
+
+    @property
+    def context_id(self) -> str | None:
+        """Get the current context ID for multi-turn conversations."""
+        return self._context_id
+
+    @context_id.setter
+    def context_id(self, value: str | None) -> None:
+        """Set the context ID for multi-turn conversations."""
+        self._context_id = value
+
+    def reset_context(self) -> None:
+        """Reset the context ID for a new conversation."""
+        self._context_id = None
 
     async def fetch_skills(self) -> list[Any]:
         """
@@ -84,8 +109,11 @@ class A2AToolSpec(BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExt
         The function internally wraps the call_skill call to the A2A client.
         """
 
-        async def async_tool_fn(**kwargs):
-            return await self.client.call_skill(skill_name, kwargs)
+        async def async_tool_fn(message: str, **kwargs):
+            # Include context_id if available for multi-turn conversations
+            if self._context_id:
+                kwargs.setdefault("context_id", self._context_id)
+            return await self.client.call_skill(skill_name, {"message": message, **kwargs})
 
         return async_tool_fn
 
@@ -103,9 +131,21 @@ class A2AToolSpec(BaseToolSpec, TypeResolutionMixin, TypeCreationMixin, FieldExt
         for skill in skills_list:
             fn = self._create_tool_fn(skill.name)
 
-            # Create a Pydantic model based on the skill input schema
-            model_schema = self.create_model_from_json_schema(
-                skill.input_schema, model_name=f"{skill.name}_Schema"
+            # Create a Pydantic model for the tool - A2A skills don't have input schemas
+            # so we create a simple model accepting a message string
+            from pydantic import Field
+
+            model_schema = create_model(
+                f"{skill.name}_Schema",
+                message=(
+                    str,
+                    Field(description=f"Natural language input for {skill.name} skill"),
+                ),
+                context_id=(
+                    str | None,
+                    Field(default=None, description="Context ID for multi-turn conversation"),
+                ),
+                __base__=BaseModel,
             )
 
             # Set up global partial params as default

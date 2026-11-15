@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llama-index-tools-a2a"
-version = "0.1.2"
+version = "0.1.3"
 description = "A2A (Agent-to-Agent) Protocol integration for LlamaIndex"
 readme = "README.md"
 license = "MIT"
