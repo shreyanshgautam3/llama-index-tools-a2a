@@ -108,32 +108,33 @@ app = workflow_as_a2a(MyWorkflow())
 
 This integration mirrors the existing `llama-index-tools-mcp` pattern:
 
-| Concept | MCP Equivalent | A2A Implementation |
-|---------|---------------|-------------------|
-| Tool discovery | `list_tools()` | AgentCard.skills[] |
-| Tool invocation | `call_tool(name, args)` | `message/send` + `tasks/get` |
-| Inbound server | `MCPServer` | ASGI app (`workflow_as_a2a()`) |
-| Workflow wrapping | `workflow_as_mcp()` | `workflow_as_a2a()` |
+| Concept | MCP Equivalent | A2A v0.3 | A2A v1.0 |
+|---------|---------------|----------|----------|
+| Tool discovery | `list_tools()` | AgentCard.skills[] | AgentCard.skills[] |
+| Tool invocation | `call_tool(name, args)` | `message/send` + `tasks/get` | `SendMessage` + `GetTask` |
+| Inbound server | `MCPServer` | ASGI app (`workflow_as_a2a()`) | ASGI app (`workflow_as_a2a()`) |
+| Workflow wrapping | `workflow_as_mcp()` | `workflow_as_a2a()` | `workflow_as_a2a()` |
 
 ## Protocol Version
 
 This package supports **both A2A v0.3 and v1.0** via automatic protocol detection:
 
-- **Outbound client** (`BasicA2AClient`): Auto-detects version from AgentCard, sends `A2A-Version: 1.0` header for v1.0 servers, uses v1.0 method names (`SendMessage`, `GetTask`) when appropriate, falls back to v0.3 methods (`message/send`, `tasks/get`, `tasks/send`) for compatibility. Force a version with `protocol_version="0.3"` or `"1.0"` constructor argument.
-- **Inbound server** (`workflow_as_a2a`): Generates v1.0 AgentCard with `supportedInterfaces[]` by default (set `protocol_version="0.3"` for legacy format).
-- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`).
+- **Outbound client** (`BasicA2AClient`): Auto-detects version from AgentCard `supportedInterfaces` field (wire format). Sends `A2A-Version: 1.0` header for v1.0 servers, uses v1.0 method names (`SendMessage`, `GetTask`), falls back to v0.3 methods (`message/send`, `tasks/get`) for compatibility. Force a version with `protocol_version="0.3"` or `"1.0"` constructor argument.
+- **Inbound server** (`workflow_as_a2a`): Generates v1.0 AgentCard with `supportedInterfaces[]` by default (`protocol_version="1.0"`) — note: underlying a2a-sdk 0.3.26 request handler only processes v0.3 method names regardless of AgentCard format.
+- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`) with discriminated union Part types (no `kind` field).
 
-Based on `a2a-sdk==0.3.26` with v1.0 additions. See [CHANGELOG](CHANGELOG.md) for version history.
+Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions. See [CHANGELOG](CHANGELOG.md) for version history.
 
 ## Limitations
 
 - **Authentication**: No built-in auth handling — relies on caller to supply headers/tokens via `BasicA2AClient` constructor.
-- **Streaming**: Inbound server declares `streaming: true` but actual SSE/event streaming is not yet implemented in `WorkflowAgentExecutor`.
-- **Task polling**: `call_skill` uses `SendMessage` (v1.0) or `tasks/send` (v0.3) — fire-and-forget; no automatic polling for long-running tasks. Use `get_task()` to retrieve results.
+- **Streaming**: Inbound server declares `streaming: false` (correct) — actual SSE/event streaming is not implemented in `WorkflowAgentExecutor`.
+- **Task polling**: `call_skill` uses `SendMessage` (v1.0) or `message/send` (v0.3) — fire-and-forget; no automatic polling for long-running tasks. Use `get_task()` to retrieve results.
 - **Error handling**: Error responses from agents are wrapped in `TaskResult.error` but not systematically classified.
-- **Testing**: All 13 tests use mocked transports (`ASGITransport`) — no integration tests against real A2A v1.0 reference servers.
+- **Testing**: 34 tests (13 unit + 12 v1.0 + 9 integration) — integration tests use `ASGITransport` against local server; no tests against external A2A v1.0 reference servers.
 - **Multi-turn**: `contextId` is passed through but conversation state management is caller responsibility (use `A2AToolSpec.context_id` property).
 - **Skill schemas**: A2A v1.0 skills do not include JSON input schemas; tools accept natural language `message` parameter (pass JSON in text for structured input).
+- **Underlying SDK**: Uses `a2a-sdk==0.3.26` — inbound server handles only v0.3 method names regardless of AgentCard format version.
 
 ## Usage Examples
 
@@ -152,6 +153,7 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
+- **v0.1.4** (2026-11-16): Fixed A2A v1.0 protocol compliance — v1.0 method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), dead code removal, 9 new integration tests with client-server round-trip verification ✅
 - **v0.1.3** (2026-11-15): A2A v1.0 dual-version support, multi-turn contextId, honest feature naming, FunctionAgent examples ✅
 - **v0.1.2** (2026-11-14): CI stability — strict asyncio mode, debug output, protocol version docs ✅
 - **v0.1.1** (2026-11-12): PyPI publishing fix — version alignment, CI workflow reliability ✅

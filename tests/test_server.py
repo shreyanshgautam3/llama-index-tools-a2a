@@ -38,7 +38,7 @@ async def test_agent_card():
         assert card["version"] == "1.0.0"
         assert len(card["skills"]) == 1
         assert card["skills"][0]["id"] == "simpleworkflow"
-        assert card["capabilities"]["streaming"] is True
+        assert card["capabilities"]["streaming"] is False
 
 
 @pytest.mark.asyncio

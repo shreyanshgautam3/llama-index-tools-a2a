@@ -8,7 +8,7 @@ Supports both v0.3 and v1.0 protocol versions.
 - Skill: Individual capability definition
 - Task: Unit of work exchanged between agents
 - Message: Communication unit with parts (text, file, etc.)
-- Part: Content fragment within a message
+- Part: Content fragment within a message (v1.0: discriminated union, no 'kind' field)
 - TaskResult: Response from skill/task execution
 """
 
@@ -17,8 +17,33 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-class Part(BaseModel):
-    """A single content part within a message or task input/output."""
+class TextPart(BaseModel):
+    """Text content part (v1.0: no 'kind' field, discriminated by 'text' presence)."""
+
+    text: str
+
+
+class FilePart(BaseModel):
+    """File content part (v1.0: no 'kind' field, discriminated by 'file' presence)."""
+
+    file: str  # file URI or base64 data
+    mime_type: str | None = None
+    name: str | None = None
+
+
+class DataPart(BaseModel):
+    """Structured data part (v1.0: no 'kind' field, discriminated by 'data' presence)."""
+
+    data: dict[str, Any]
+
+
+# v1.0 Part is a discriminated union - no 'kind' field
+Part = TextPart | FilePart | DataPart
+
+
+# v0.3 compatibility: PartWithKind for legacy wire format
+class PartWithKind(BaseModel):
+    """Legacy v0.3 Part with 'kind' field for backward compatibility."""
 
     kind: Literal["text", "file", "image"]
     text: str | None = None
@@ -92,6 +117,7 @@ class Capability(BaseModel):
 class Skill(Capability):
     """A named capability that can be invoked by other agents."""
 
+    id: str = Field(default_factory=lambda: "")
     name: str
     endpoint: str | None = None
     input_schema: dict[str, Any] | None = Field(default_factory=dict)
@@ -143,7 +169,7 @@ class AgentCard(BaseModel):
     default_output_modes: list[str] | None = None
     # v0.3 fields (kept for backward compatibility)
     url: str | None = None
-    preferred_transport: str | None = None
+    preferred_transport: str | None = Field(default=None, alias="preferredTransport")
     protocol_version: str | None = None
     # v1.0 fields - a2a-sdk uses additionalInterfaces, wire format also uses additionalInterfaces
     additional_interfaces: list[AgentInterface] = Field(

@@ -5,10 +5,18 @@ Mirrors the BasicMCPClient pattern but adapted for the A2A protocol.
 Handles AgentCard discovery and task-based skill invocation.
 
 Supports both A2A protocol v0.3 and v1.0 via version detection and A2A-Version header.
+
+v1.0 Protocol Notes:
+- Method names: SendMessage, GetTask (PascalCase)
+- Part structure: discriminated union (TextPart, FilePart, DataPart) - NO 'kind' field
+- contextId: placed ON the Message object, not as top-level param
+- skill_name: embedded in message text as JSON {"skill": "name", "message": "..."}
+- A2A-Version: 1.0 header required for v1.0 servers
 """
 
+import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -22,29 +30,10 @@ from llama_index.tools.a2a.models import (
     Task,
     TaskOutput,
     TaskResult,
+    TextPart,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class DefaultInMemoryTokenStorage:
-    """Simple in-memory token storage for A2A authentication."""
-
-    def __init__(self):
-        self._tokens: dict | None = None
-        self._client_info: dict | None = None
-
-    async def get_tokens(self) -> dict | None:
-        return self._tokens
-
-    async def set_tokens(self, tokens: dict) -> None:
-        self._tokens = tokens
-
-    async def get_client_info(self) -> dict | None:
-        return self._client_info
-
-    async def set_client_info(self, client_info: dict) -> None:
-        self._client_info = client_info
 
 
 class BasicA2AClient:
@@ -61,8 +50,6 @@ class BasicA2AClient:
         agent_card_url: The URL of the agent card (e.g., https://agent.example.com/.well-known/agent-card.json).
         timeout: The timeout for HTTP operations in seconds. Default is 30.
         headers: Optional headers to pass with requests.
-        auth: Optional authentication handler.
-        tool_call_logs_callback: Async function to capture logs from skill calls.
         protocol_version: Force a specific protocol version ("0.3" or "1.0"). Default: auto-detect.
 
     """
@@ -72,15 +59,11 @@ class BasicA2AClient:
         agent_card_url: str,
         timeout: int = 30,
         headers: dict[str, str] | None = None,
-        auth: Any | None = None,
-        tool_call_logs_callback: Callable[[list[str]], Awaitable[Any]] | None = None,
         protocol_version: str | None = None,
     ):
         self.agent_card_url = agent_card_url
         self.timeout = timeout
         self.base_headers = headers or {}
-        self.auth = auth
-        self.tool_call_logs_callback = tool_call_logs_callback
         self._forced_protocol_version = protocol_version
 
         # Cached agent card
@@ -119,12 +102,11 @@ class BasicA2AClient:
         if self._forced_protocol_version:
             self._detected_version = self._forced_protocol_version
         else:
-            # v1.0 has additional_interfaces (a2a-sdk field for additionalInterfaces)
-            # v0.3 has url + preferred_transport
-            # Check both field names for compatibility with wire format
-            has_additional = getattr(self._agent_card, 'additional_interfaces', None)
+            # v1.0 wire format uses supportedInterfaces (not additionalInterfaces)
+            # additionalInterfaces is a2a-sdk 0.3.26 internal field name
+            # Only detect v1.0 if supported_interfaces is present
             has_supported = getattr(self._agent_card, 'supported_interfaces', None)
-            if has_additional or has_supported:
+            if has_supported:
                 self._detected_version = "1.0"
             else:
                 self._detected_version = "0.3"
@@ -224,6 +206,26 @@ class BasicA2AClient:
         response.raise_for_status()
         return response.json()
 
+    def _build_v1_message(
+        self, skill_name: str, message_text: str, context_id: str | None = None
+    ) -> Message:
+        """Build a v1.0 Message with skill_name embedded in text and contextId on the Message."""
+        # v1.0: embed skill name in message text as JSON
+        message_payload = json.dumps({"skill": skill_name, "message": message_text})
+        parts = [TextPart(text=message_payload)]
+        msg = Message(role="user", parts=parts)
+        if context_id:
+            msg.context_id = context_id
+        return msg
+
+    def _build_v1_parts(self, message_text: str) -> list[Part]:
+        """Build v1.0 parts (discriminated union, no 'kind' field)."""
+        return [TextPart(text=message_text)]
+
+    def _build_v03_parts(self, message_text: str) -> list[dict]:
+        """Build v0.3 parts (with 'kind' field for wire compatibility)."""
+        return [{"kind": "text", "text": message_text}]
+
     async def call_skill(
         self,
         skill_name: str,
@@ -232,8 +234,9 @@ class BasicA2AClient:
         """
         Call a specific skill on the A2A agent.
 
-        This method creates a task, sends it to the agent, and polls
-        for the result using the A2A task protocol.
+        This method sends a message to the agent via SendMessage (v1.0) or
+        message/send (v0.3) and returns the task result. It does NOT poll;
+        use get_task() to retrieve results for long-running tasks.
 
         Args:
             skill_name: The name of the skill to invoke.
@@ -248,33 +251,28 @@ class BasicA2AClient:
 
         if self.protocol_version == "1.0":
             # v1.0: Extract message and context_id from arguments
-            # Tool function in base.py passes {"message": message, "context_id": context_id, ...}
             message_text = ""
             context_id = None
             if arguments:
                 message_text = arguments.get("message", "")
                 context_id = arguments.get("context_id")
 
-            input_parts = [Part(kind="text", text=message_text)]
+            # Build v1.0 message with skill_name embedded
+            msg = self._build_v1_message(skill_name, message_text, context_id)
 
-            # v1.0: Use SendMessage with message parameter
             params = {
-                "message": Message(
-                    role="user",
-                    parts=input_parts,
-                ).model_dump(exclude_none=True)
+                "message": msg.model_dump(exclude_none=True)
             }
-            if context_id:
-                params["contextId"] = context_id
 
             result = await self._send_v1_request("SendMessage", params)
             raw_result = result.get("result", {})
             # v1.0 SendMessage returns either task or message
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
+                artifact = send_result.task.artifacts[0] if send_result.task.artifacts else None
                 return TaskResult(
                     task_id=send_result.task.id,
-                    output=send_result.task.artifacts[0] if send_result.task.artifacts else None,
+                    output=TaskOutput(parts=artifact.parts) if artifact else None,
                     metadata=send_result.task.metadata,
                 )
             elif send_result.message:
@@ -284,8 +282,11 @@ class BasicA2AClient:
                 )
             return TaskResult(task_id="")
         else:
-            # v0.3: Use tasks/send - stringify the entire arguments dict
-            input_parts = [Part(kind="text", text=str(arguments) if arguments else "")]
+            # v0.3: Use message/send with task-like input structure
+            # Serialize arguments as proper JSON (not Python str repr)
+            import json
+            message_text = json.dumps(arguments) if arguments else "{}"
+            input_parts = self._build_v03_parts(message_text)
 
             skill_endpoint = card.url
             for skill in card.skills:
@@ -293,17 +294,38 @@ class BasicA2AClient:
                     skill_endpoint = skill.endpoint or card.url
                     break
 
+            # v0.3 requires messageId in the message object
+            import uuid
             params = {
-                "task": {
-                    "name": skill_name,
-                    "input": {"parts": [p.model_dump() for p in input_parts]},
+                "message": {
+                    "messageId": f"msg-{uuid.uuid4().hex[:8]}",
+                    "role": "user",
+                    "parts": input_parts,
                 }
             }
-            result = await self._send_v03_request(skill_endpoint, "tasks/send", params)
+            result = await self._send_v03_request(skill_endpoint, "message/send", params)
             raw_result = result.get("result", {})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
-            return TaskResult.model_validate(raw_result)
+            # v0.3 returns a full Task object - convert to TaskResult
+            task_id = raw_result.get("id") or raw_result.get("task_id") or ""
+            artifacts = raw_result.get("artifacts", [])
+            output = None
+            if artifacts:
+                # Get parts from first artifact
+                parts = artifacts[0].get("parts", [])
+                # Convert v0.3 parts (with 'kind') to our Part model
+                converted_parts = []
+                for p in parts:
+                    if "text" in p:
+                        converted_parts.append(TextPart(text=p["text"]))
+                output = TaskOutput(parts=converted_parts)
+            return TaskResult(
+                task_id=task_id,
+                output=output,
+                error=None,
+                metadata=raw_result.get("metadata", {}),
+            )
 
     async def send_message(
         self,
@@ -322,18 +344,16 @@ class BasicA2AClient:
         """
         card = await self._discover_agent_card()
 
-        input_parts = [Part(kind="text", text=message)]
-
         if self.protocol_version == "1.0":
-            # v1.0: Use SendMessage
+            # v1.0: Use SendMessage with contextId on Message
+            msg = Message(
+                role="user",
+                parts=self._build_v1_parts(message),
+                context_id=context_id,
+            )
             params = {
-                "message": Message(
-                    role="user",
-                    parts=input_parts,
-                ).model_dump(exclude_none=True)
+                "message": msg.model_dump(exclude_none=True)
             }
-            if context_id:
-                params["contextId"] = context_id
             result = await self._send_v1_request("SendMessage", params)
             raw_result = result.get("result", {})
             send_result = SendMessageResult.model_validate(raw_result)
@@ -350,17 +370,17 @@ class BasicA2AClient:
                 )
             return TaskResult(task_id="")
         else:
-            # v0.3: Use messages/send
+            # v0.3: Use message/send
             params = {
                 "message": {
                     "role": "user",
-                    "parts": [{"kind": "text", "text": message}],
+                    "parts": self._build_v03_parts(message),
                 }
             }
             if context_id:
                 params["contextId"] = context_id
 
-            result = await self._send_v03_request(card.url, "messages/send", params)
+            result = await self._send_v03_request(card.url, "message/send", params)
             raw_result = result.get("result", {})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
@@ -395,6 +415,35 @@ class BasicA2AClient:
             raw_result = result.get("result", {})
             try:
                 task = Task.model_validate(raw_result)
+                # v1.0: Check task state for input-required, failed, canceled
+                task_state = task.status.state if task.status else "unknown"
+                if task_state == "input-required":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32001,
+                            "message": "Task requires additional input",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "failed":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32002,
+                            "message": "Task failed",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "canceled":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32003,
+                            "message": "Task was canceled",
+                            "data": {"state": task_state},
+                        },
+                    )
                 return TaskResult(
                     task_id=task.id,
                     output=task.artifacts[0] if task.artifacts else None,

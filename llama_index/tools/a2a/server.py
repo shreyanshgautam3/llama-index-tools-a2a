@@ -19,9 +19,15 @@ from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import (
-    AgentCapabilities,
-    AgentCard,
-    AgentProvider,
+    AgentCapabilities as A2AAgentCapabilities,
+)
+from a2a.types import (
+    AgentCard as A2AAgentCard,
+)
+from a2a.types import (
+    AgentProvider as A2AAgentProvider,
+)
+from a2a.types import (
     AgentSkill,
     Artifact,
     Message,
@@ -31,6 +37,15 @@ from a2a.types import (
     TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
+)
+
+# Use our local AgentCard model which has supported_interfaces for v1.0 wire format
+from llama_index.tools.a2a.models import (
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentProvider,
+    Skill,
 )
 
 
@@ -167,13 +182,16 @@ def create_agent_card(
     start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
-    protocol_version: str = "1.0",
+    protocol_version: str = "0.3",
 ) -> AgentCard:
     """Create an AgentCard from a LlamaIndex Workflow.
 
     Args:
-        protocol_version: "0.3" for v0.3 format (url + preferred_transport),
-                          "1.0" for v1.0 format (supportedInterfaces).
+        protocol_version: "0.3" for v0.3 format (url + preferred_transport).
+                          "1.0" for v1.0 AgentCard format (supportedInterfaces) --
+                          NOTE: underlying a2a-sdk 0.3.26 only handles v0.3 method names
+                          (message/send, tasks/get). Use "1.0" only for AgentCard format
+                          compatibility with v1.0 clients; method calls will still use v0.3.
     """
     name = workflow_name or workflow.__class__.__name__
     description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow Agent"
@@ -195,27 +213,39 @@ def create_agent_card(
         output_modes=["text", "application/json"],
     )
 
-    capabilities = AgentCapabilities(streaming=True, push_notifications=False)
+    # Create our local AgentCard model for discovery/serialization
+    capabilities = AgentCapabilities(streaming=False, push_notifications=False)
     provider = AgentProvider(
         organization="LlamaIndex", url="https://github.com/run-llama/llama_index"
     )
 
-    from a2a.types import AgentInterface as A2AAgentInterface
-
     if protocol_version == "1.0":
-        # v1.0 format: additional_interfaces (a2a-sdk field name for supportedInterfaces)
+        # v1.0 AgentCard format: supportedInterfaces (wire format field name)
+        # NOTE: This only changes the AgentCard format. The underlying a2a-sdk 0.3.26
+        # request handler only supports v0.3 method names (message/send, tasks/get).
+        # We use supported_interfaces (alias supportedInterfaces) for v1.0 wire compatibility.
         agent_card = AgentCard(
             name=name,
             description=description,
             version=version,
             url=url,  # Still included for compatibility
-            skills=[skill],
+            skills=[Skill(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                tags=skill.tags,
+                examples=skill.examples,
+                input_modes=skill.input_modes,
+                output_modes=skill.output_modes,
+                input_schema={},
+                output_schema={},
+            )],
             capabilities=capabilities,
             provider=provider,
             default_input_modes=["text", "application/json"],
             default_output_modes=["text", "application/json"],
-            additional_interfaces=[
-                A2AAgentInterface(
+            supported_interfaces=[
+                AgentInterface(
                     transport="JSONRPC",
                     url=url,
                 )
@@ -228,7 +258,17 @@ def create_agent_card(
             description=description,
             version=version,
             url=url,
-            skills=[skill],
+            skills=[Skill(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                tags=skill.tags,
+                examples=skill.examples,
+                input_modes=skill.input_modes,
+                output_modes=skill.output_modes,
+                input_schema={},
+                output_schema={},
+            )],
             capabilities=capabilities,
             provider=provider,
             default_input_modes=["text", "application/json"],
@@ -239,6 +279,64 @@ def create_agent_card(
     return agent_card
 
 
+def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> A2AAgentCard:
+    """Convert our local AgentCard to a2a-sdk AgentCard for A2AFastAPIApplication."""
+    # Convert skills
+    a2a_skills = []
+    for s in local_card.skills:
+        a2a_skills.append(AgentSkill(
+            id=s.id,
+            name=s.name,
+            description=s.description,
+            tags=s.tags or ["workflow", "llama-index"],
+            examples=[],
+            input_modes=["text", "application/json"],
+            output_modes=["text", "application/json"],
+        ))
+
+    # Convert capabilities
+    a2a_capabilities = A2AAgentCapabilities(
+        streaming=local_card.capabilities.streaming if local_card.capabilities else False,
+        push_notifications=(
+            local_card.capabilities.push_notifications if local_card.capabilities else False
+        ),
+    )
+
+    # Convert provider
+    a2a_provider = A2AAgentProvider(
+        organization=local_card.provider.organization if local_card.provider else "LlamaIndex",
+        url=local_card.provider.url if local_card.provider else "https://github.com/run-llama/llama_index",
+    )
+
+    # Build a2a-sdk AgentCard
+    a2a_card_data = {
+        "name": local_card.name,
+        "description": local_card.description,
+        "version": local_card.version,
+        "url": local_card.url,
+        "skills": a2a_skills,
+        "capabilities": a2a_capabilities,
+        "provider": a2a_provider,
+        "default_input_modes": local_card.default_input_modes or ["text", "application/json"],
+        "default_output_modes": local_card.default_output_modes or ["text", "application/json"],
+    }
+
+    if protocol_version == "1.0":
+        # v1.0: use additional_interfaces (a2a-sdk field name)
+        a2a_interfaces = []
+        for iface in (local_card.supported_interfaces or []):
+            a2a_interfaces.append({
+                "transport": iface.transport,
+                "url": iface.url,
+            })
+        a2a_card_data["additional_interfaces"] = a2a_interfaces
+    else:
+        # v0.3: use preferred_transport
+        a2a_card_data["preferred_transport"] = local_card.preferred_transport or "JSONRPC"
+
+    return A2AAgentCard(**a2a_card_data)
+
+
 def workflow_as_a2a(
     workflow: Workflow,
     workflow_name: str | None = None,
@@ -246,7 +344,7 @@ def workflow_as_a2a(
     start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
-    protocol_version: str = "1.0",
+    protocol_version: str = "0.3",
     **app_kwargs: Any,
 ) -> Any:
     """
@@ -262,7 +360,10 @@ def workflow_as_a2a(
                            Defaults to workflow._start_event_class.
         url: Base URL where the agent will be hosted.
         version: Version string for the agent card.
-        protocol_version: A2A protocol version ("0.3" or "1.0"). Default: "1.0".
+        protocol_version: A2A AgentCard format version ("0.3" or "1.0"). Default: "0.3".
+                          NOTE: The underlying a2a-sdk 0.3.26 only supports v0.3
+                          method names (message/send, tasks/get). Use "1.0" for
+                          AgentCard format compatibility only; method calls use v0.3.
         **app_kwargs: Additional kwargs passed to FastAPI constructor.
 
     Returns:
@@ -282,8 +383,8 @@ def workflow_as_a2a(
         >>> app = workflow_as_a2a(MyWorkflow())
         >>> # Run: uvicorn my_app:app --host 0.0.0.0 --port 8000
     """
-    # Create AgentCard
-    agent_card = create_agent_card(
+    # Create AgentCard (local model for discovery/serialization)
+    local_agent_card = create_agent_card(
         workflow=workflow,
         workflow_name=workflow_name,
         workflow_description=workflow_description,
@@ -292,6 +393,9 @@ def workflow_as_a2a(
         version=version,
         protocol_version=protocol_version,
     )
+
+    # Convert to a2a-sdk AgentCard for A2AFastAPIApplication
+    a2a_agent_card = _to_a2a_agent_card(local_agent_card, protocol_version)
 
     # Create executor
     executor = WorkflowAgentExecutor(
@@ -304,7 +408,7 @@ def workflow_as_a2a(
     # Create task store
     task_store = InMemoryTaskStore()
 
-    # Create request handler (agent_card handled by A2AFastAPIApplication separately)
+    # Create request handler
     request_handler = DefaultRequestHandler(
         agent_executor=executor,
         task_store=task_store,
@@ -312,14 +416,30 @@ def workflow_as_a2a(
 
     # Build the A2A FastAPI application
     app = A2AFastAPIApplication(
-        agent_card=agent_card,
+        agent_card=a2a_agent_card,
         http_handler=request_handler,
     ).build(**app_kwargs)
 
-    # Store references on app state for programmatic access
-    app.state.agent_card = agent_card
+    # Store references on app state for programmatic access (use local card for consistency)
+    app.state.agent_card = local_agent_card
     app.state.executor = executor
     app.state.task_store = task_store
     app.state.request_handler = request_handler
+
+    # Override agent-card route to serve local card (with supportedInterfaces for v1.0)
+    async def _serve_local_agent_card():
+        # Serialize local card using by_alias=True for camelCase wire format
+        return local_agent_card.model_dump(by_alias=True, exclude_none=True)
+
+    # Find and replace the agent-card route
+    for i, route in enumerate(app.routes):
+        if hasattr(route, 'path') and route.path == '/.well-known/agent-card.json':
+            app.routes[i] = type(route)(
+                path=route.path,
+                endpoint=_serve_local_agent_card,
+                methods=route.methods,
+                name=route.name,
+            )
+            break
 
     return app
