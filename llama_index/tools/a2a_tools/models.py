@@ -119,9 +119,9 @@ class Skill(Capability):
 
     id: str = Field(default_factory=lambda: "")
     name: str
-    endpoint: str | None = None
-    input_schema: dict[str, Any] | None = Field(default_factory=dict)
-    output_schema: dict[str, Any] | None = Field(default_factory=dict)
+    input_modes: list[str] | None = None
+    output_modes: list[str] | None = None
+    # input_schema and output_schema are not standard A2A fields; removed per A2A spec
 
 
 class AgentCapabilities(BaseModel):
@@ -172,12 +172,12 @@ class AgentCard(BaseModel):
     preferred_transport: str | None = Field(default=None, alias="preferredTransport")
     protocol_version: str | None = None
     # v1.0 fields - a2a-sdk uses additionalInterfaces, wire format also uses additionalInterfaces
-    additional_interfaces: list[AgentInterface] = Field(
-        default_factory=list, alias="additionalInterfaces"
+    additional_interfaces: list[AgentInterface] | None = Field(
+        default=None, alias="additionalInterfaces"
     )
     # Alias for backward compatibility - some docs refer to this as supportedInterfaces
-    supported_interfaces: list[AgentInterface] = Field(
-        default_factory=list, alias="supportedInterfaces"
+    supported_interfaces: list[AgentInterface] | None = Field(
+        default=None, alias="supportedInterfaces"
     )
 
     @property

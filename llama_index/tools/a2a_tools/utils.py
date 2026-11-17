@@ -9,8 +9,8 @@ from typing import Any
 
 from llama_index.core.tools import FunctionTool
 
-from llama_index.tools.a2a.base import A2AToolSpec
-from llama_index.tools.a2a.client import BasicA2AClient
+from .base import A2AToolSpec
+from .client import BasicA2AClient
 
 
 def get_tools_from_a2a_card(

@@ -4,8 +4,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from llama_index.core.workflow import StartEvent, StopEvent, Workflow, step
 
-from llama_index.tools.a2a import workflow_as_a2a
-from llama_index.tools.a2a.client import BasicA2AClient
+from llama_index.tools.a2a_tools import workflow_as_a2a
+from llama_index.tools.a2a_tools.client import BasicA2AClient
 
 
 class SimpleStart(StartEvent):
@@ -28,7 +28,7 @@ class MultiStepWorkflow(Workflow):
 @pytest.mark.asyncio
 async def test_v03_client_server_roundtrip():
     """Test v0.3 client-server round-trip with message/send and tasks/get."""
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="0.3")
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -44,9 +44,15 @@ async def test_v03_client_server_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_v10_agent_card_format():
-    """Test v1.0 AgentCard format (supportedInterfaces) but v0.3 method handling."""
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="1.0")
+async def test_v10_agent_card_format_not_supported():
+    """Test that v1.0 AgentCard format is NOT supported by the server (a2a-sdk 0.3.26 limitation)."""
+    # v1.0 is not supported - create_agent_card should raise NotImplementedError
+    from llama_index.tools.a2a_tools.server import create_agent_card
+    with pytest.raises(NotImplementedError):
+        create_agent_card(SimpleWorkflow(), protocol_version="1.0")
+
+    # But workflow_as_a2a with default (v0.3) should work
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -55,16 +61,17 @@ async def test_v10_agent_card_format():
         assert card_resp.status_code == 200
         card = card_resp.json()
 
-        # Verify v1.0 AgentCard format (supportedInterfaces - wire format)
-        assert "supportedInterfaces" in card
+        # Verify v0.3 format (no supportedInterfaces)
+        assert "url" in card
+        assert card["preferredTransport"] == "JSONRPC"
+        assert "supportedInterfaces" not in card
         assert card["capabilities"]["streaming"] is False
-        # But underlying SDK still uses v0.3 method names
 
 
 @pytest.mark.asyncio
 async def test_v03_message_send_flow():
     """Test v0.3 message/send flow through the server."""
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="0.3")
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -95,7 +102,7 @@ async def test_v03_message_send_flow():
 @pytest.mark.asyncio
 async def test_v03_tasks_get_flow():
     """Test v0.3 tasks/get flow through the server."""
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="0.3")
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -133,19 +140,13 @@ async def test_v03_tasks_get_flow():
 
 
 @pytest.mark.asyncio
-async def test_v10_agent_card_with_v03_methods():
-    """Test that v1.0 AgentCard format still uses v0.3 method names."""
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="1.0")
+async def test_v10_methods_not_supported_by_server():
+    """Test that v1.0 methods (SendMessage, GetTask) return -32601 on the server."""
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Get agent card - should have v1.0 format
-        card_resp = await client.get("/.well-known/agent-card.json")
-        card = card_resp.json()
-        assert "supportedInterfaces" in card
-
-        # But methods should be v0.3 (message/send, tasks/get)
-        # Send message using v0.3 message/send (the only method supported)
+        # v0.3 method should work
         resp = await client.post(
             "/",
             json={
@@ -167,7 +168,7 @@ async def test_v10_agent_card_with_v03_methods():
         task = result["result"]
         assert task["status"]["state"] == "completed"
 
-        # v1.0 methods should NOT work
+        # v1.0 methods should NOT work (a2a-sdk 0.3.26 doesn't support them)
         resp = await client.post(
             "/",
             json={
@@ -194,32 +195,10 @@ async def test_v10_agent_card_with_v03_methods():
 @pytest.mark.asyncio
 async def test_version_auto_detection():
     """Test that client auto-detects protocol version from agent card."""
-    from llama_index.tools.a2a.models import AgentCard
+    from llama_index.tools.a2a_tools.models import AgentCard
 
-    # Test v1.0 AgentCard format detection
-    app_v10 = workflow_as_a2a(SimpleWorkflow(), protocol_version="1.0")
-    transport_v10 = ASGITransport(app=app_v10)
-
-    async with AsyncClient(transport=transport_v10, base_url="http://test") as client:
-        card_resp = await client.get("/.well-known/agent-card.json")
-        card = card_resp.json()
-
-        # Create client and verify it detects v1.0 from additionalInterfaces
-        a2a_client = BasicA2AClient("http://test/.well-known/agent-card.json")
-        a2a_client._agent_card = AgentCard.model_validate(card)
-        a2a_client._detected_version = None
-
-        # Simulate detection logic (uses supported_interfaces which aliases to additionalInterfaces)
-        has_supported = getattr(a2a_client._agent_card, "supported_interfaces", None)
-        if has_supported:
-            detected = "1.0"
-        else:
-            detected = "0.3"
-        # Note: additionalInterfaces IS detected as supported_interfaces due to alias
-        assert detected == "1.0"
-
-    # Test v0.3 card detection
-    app_v03 = workflow_as_a2a(SimpleWorkflow(), protocol_version="0.3")
+    # Test v0.3 card detection (server only produces v0.3 cards)
+    app_v03 = workflow_as_a2a(SimpleWorkflow())
     transport_v03 = ASGITransport(app=app_v03)
 
     async with AsyncClient(transport=transport_v03, base_url="http://test") as client:
@@ -230,6 +209,7 @@ async def test_version_auto_detection():
         a2a_client._agent_card = AgentCard.model_validate(card)
         a2a_client._detected_version = None
 
+        # Simulate detection logic - should be v0.3 since no supported_interfaces
         has_supported = getattr(a2a_client._agent_card, 'supported_interfaces', None)
         if has_supported:
             detected = "1.0"
@@ -241,7 +221,7 @@ async def test_version_auto_detection():
 @pytest.mark.asyncio
 async def test_multi_step_workflow_v03():
     """Test multi-step workflow with v0.3 protocol."""
-    app = workflow_as_a2a(MultiStepWorkflow(), protocol_version="0.3")
+    app = workflow_as_a2a(MultiStepWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -270,9 +250,9 @@ async def test_multi_step_workflow_v03():
 
 
 @pytest.mark.asyncio
-async def test_multi_step_workflow_v10_card():
-    """Test multi-step workflow with v1.0 AgentCard format (v0.3 methods)."""
-    app = workflow_as_a2a(MultiStepWorkflow(), protocol_version="1.0")
+async def test_multi_step_workflow_v03_only():
+    """Test multi-step workflow with v0.3 protocol (only supported version)."""
+    app = workflow_as_a2a(MultiStepWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -303,9 +283,9 @@ async def test_multi_step_workflow_v10_card():
 @pytest.mark.asyncio
 async def test_client_v03_call_skill():
     """Test BasicA2AClient v0.3 call_skill against real server."""
-    from llama_index.tools.a2a.models import AgentCard
+    from llama_index.tools.a2a_tools.models import AgentCard
 
-    app = workflow_as_a2a(SimpleWorkflow(), protocol_version="0.3")
+    app = workflow_as_a2a(SimpleWorkflow())
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as http_client:
@@ -315,7 +295,7 @@ async def test_client_v03_call_skill():
 
         # Create A2A client with the real HTTP transport
         a2a_client = BasicA2AClient(
-            "http://test/.well-known/agent-card.json", protocol_version="0.3"
+            "http://test/.well-known/agent-card.json"
         )
         # Replace the internal HTTP client with our test client
         a2a_client._http_client = http_client

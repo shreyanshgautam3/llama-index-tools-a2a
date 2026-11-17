@@ -19,7 +19,7 @@ from llama_index.core.tools.tool_spec.base import BaseToolSpec
 from llama_index.core.tools.types import ToolMetadata
 from pydantic import BaseModel, create_model
 
-from llama_index.tools.a2a.tool_spec_mixins import (
+from .tool_spec_mixins import (
     FieldExtractionMixin,
     TypeCreationMixin,
     TypeResolutionMixin,

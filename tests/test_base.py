@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from llama_index.core.tools import FunctionTool
 
-from llama_index.tools.a2a import A2AToolSpec, BasicA2AClient
-from llama_index.tools.a2a.models import AgentCapabilities, AgentCard, Skill
+from llama_index.tools.a2a_tools import A2AToolSpec, BasicA2AClient
+from llama_index.tools.a2a_tools.models import AgentCapabilities, AgentCard, Skill
 
 
 @pytest.mark.asyncio

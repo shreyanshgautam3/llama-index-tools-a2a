@@ -13,7 +13,7 @@ import argparse
 import uvicorn
 from llama_index.core.workflow import StartEvent, StopEvent, Workflow, step
 
-from llama_index.tools.a2a import workflow_as_a2a
+from llama_index.tools.a2a_tools import workflow_as_a2a
 
 
 class ResearchStart(StartEvent):

@@ -11,7 +11,9 @@ Enable your LlamaIndex agents to discover and invoke other A2A-compatible agents
 
 ## Why?
 
-Agents are becoming composable building blocks, and the A2A (Agent-to-Agent) protocol is the emerging standard for letting independently built agents discover and call each other. While Google's A2A team has an inbound prototype, this package provides a complete, importable integration for LlamaIndex — covering both outbound client (connecting to remote A2A agents) and inbound server (exposing LlamaIndex Workflows as A2A agents) with FunctionTool conversion, partial parameter support, and multi-turn conversation handling.
+Agents are becoming composable building blocks, and the A2A (Agent-to-Agent) protocol is the emerging standard for letting independently built agents discover and call each other. This package provides an integration for LlamaIndex — covering both outbound client (connecting to remote A2A agents) and inbound server (exposing LlamaIndex Workflows as A2A agents) with FunctionTool conversion, partial parameter support, and multi-turn conversation handling.
+
+**Note:** The inbound server is limited to A2A v0.3 due to the underlying a2a-sdk 0.3.26. The outbound client experimentally supports v1.0 method names for future compatibility.
 
 ## Features
 
@@ -44,7 +46,7 @@ pip install "llama-index-tools-a2a[dev]"
 ### Discovering Tools from an A2A Agent
 
 ```python
-from llama_index.tools.a2a import aget_tools_from_a2a_card
+from llama_index.tools.a2a_tools import aget_tools_from_a2a_card
 
 # Connect to a remote A2A agent and get its tools
 tools = await aget_tools_from_a2a_card(
@@ -84,7 +86,7 @@ tools = await aget_tools_from_a2a_card(
 
 ```python
 from llama_index.core.workflow import Workflow, StartEvent, StopEvent, step
-from llama_index.tools.a2a import workflow_as_a2a
+from llama_index.tools.a2a_tools import workflow_as_a2a
 
 
 class MyStartEvent(StartEvent):
@@ -117,13 +119,14 @@ This integration mirrors the existing `llama-index-tools-mcp` pattern:
 
 ## Protocol Version
 
-This package supports **both A2A v0.3 and v1.0** via automatic protocol detection:
+**Important:** The inbound server currently supports **v0.3 only** due to a2a-sdk 0.3.26 limitations.
 
 - **Outbound client** (`BasicA2AClient`): Auto-detects version from AgentCard `supportedInterfaces` field (wire format). Sends `A2A-Version: 1.0` header for v1.0 servers, uses v1.0 method names (`SendMessage`, `GetTask`), falls back to v0.3 methods (`message/send`, `tasks/get`) for compatibility. Force a version with `protocol_version="0.3"` or `"1.0"` constructor argument.
-- **Inbound server** (`workflow_as_a2a`): Generates v1.0 AgentCard with `supportedInterfaces[]` by default (`protocol_version="1.0"`) — note: underlying a2a-sdk 0.3.26 request handler only processes v0.3 method names regardless of AgentCard format.
-- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`) with discriminated union Part types (no `kind` field).
+  - v1.0 client paths are **experimental** — they are tested against mocked responses but not against real v1.0 reference servers.
+- **Inbound server** (`workflow_as_a2a`): Generates **v0.3 AgentCard** only (`protocol_version` parameter removed). The underlying a2a-sdk 0.3.26 request handler only processes v0.3 method names (`message/send`, `tasks/get`). Passing `protocol_version="1.0"` raises `NotImplementedError`.
+- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`) with discriminated union Part types (no `kind` field) for outbound client v1.0 support.
 
-Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions. See [CHANGELOG](CHANGELOG.md) for version history.
+Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions for the outbound client. See [CHANGELOG](CHANGELOG.md) for version history.
 
 ## Limitations
 
@@ -131,7 +134,7 @@ Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions. See [CHANGELOG](CH
 - **Streaming**: Inbound server declares `streaming: false` (correct) — actual SSE/event streaming is not implemented in `WorkflowAgentExecutor`.
 - **Task polling**: `call_skill` uses `SendMessage` (v1.0) or `message/send` (v0.3) — fire-and-forget; no automatic polling for long-running tasks. Use `get_task()` to retrieve results.
 - **Error handling**: Error responses from agents are wrapped in `TaskResult.error` but not systematically classified.
-- **Testing**: 34 tests (13 unit + 12 v1.0 + 9 integration) — integration tests use `ASGITransport` against local server; no tests against external A2A v1.0 reference servers.
+- **Testing**: 38 tests — integration tests use `ASGITransport` against local v0.3 server; v1.0 client paths are tested against mocked responses only (no external v1.0 reference server tests).
 - **Multi-turn**: `contextId` is passed through but conversation state management is caller responsibility (use `A2AToolSpec.context_id` property).
 - **Skill schemas**: A2A v1.0 skills do not include JSON input schemas; tools accept natural language `message` parameter (pass JSON in text for structured input).
 - **Underlying SDK**: Uses `a2a-sdk==0.3.26` — inbound server handles only v0.3 method names regardless of AgentCard format version.
@@ -142,7 +145,7 @@ See [`examples/a2a.ipynb`](examples/a2a.ipynb) for a full end-to-end Jupyter not
 - Creating an inbound A2A agent with `workflow_as_a2a()`
 - Connecting as an outbound client via `BasicA2AClient`
 - Converting skills to LlamaIndex FunctionTools with `A2AToolSpec`
-- Using A2A tools inside a LlamaIndex ReActAgent
+- Using A2A tools inside a LlamaIndex FunctionAgent (ReActAgent is deprecated in LlamaIndex 0.13+)
 - Filtering skills and pre-filling partial parameters
 
 Run the example server standalone:
@@ -153,8 +156,8 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
-- **v0.1.4** (2026-11-16): Fixed A2A v1.0 protocol compliance — v1.0 method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), dead code removal, 9 new integration tests with client-server round-trip verification ✅
-- **v0.1.3** (2026-11-15): A2A v1.0 dual-version support, multi-turn contextId, honest feature naming, FunctionAgent examples ✅
+- **v0.1.4** (2026-11-16): Fixed A2A protocol compliance — v1.0 client method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), removed v1.0 server support (a2a-sdk 0.3.26 limitation), 38 tests passing ✅
+- **v0.1.3** (2026-11-15): A2A v1.0 dual-version support (experimental), multi-turn contextId, honest feature naming, FunctionAgent examples ✅
 - **v0.1.2** (2026-11-14): CI stability — strict asyncio mode, debug output, protocol version docs ✅
 - **v0.1.1** (2026-11-12): PyPI publishing fix — version alignment, CI workflow reliability ✅
 - **v0.1.0** (2026-11-12): Initial release — Outbound client, inbound server, tool spec conversion, 13 passing tests ✅
@@ -166,8 +169,8 @@ python examples/a2a_server.py --port 8000
 - `BasicA2AClient(agent_card_url, protocol_version=None)` — Connect to an A2A agent
   - `get_agent_card()` — Discover agent metadata
   - `list_skills()` — List available skills
-  - `call_skill(name, arguments)` — Invoke a skill (v1.0: `SendMessage`, v0.3: `tasks/send`)
-  - `send_message(message, context_id)` — Send natural language message (v1.0: `SendMessage`, v0.3: `messages/send`)
+  - `call_skill(name, arguments)` — Invoke a skill (v1.0: `SendMessage`, v0.3: `message/send`)
+  - `send_message(message, context_id)` — Send natural language message (v1.0: `SendMessage`, v0.3: `message/send`)
   - `get_task(task_id)` — Get task status/result (v1.0: `GetTask`, v0.3: `tasks/get`)
   - `protocol_version` property — Get detected protocol version ("0.3" or "1.0")
 
@@ -181,8 +184,8 @@ python examples/a2a_server.py --port 8000
 
 ### Inbound Server
 
-- `workflow_as_a2a(workflow, protocol_version="1.0")` — Expose a Workflow as an A2A agent
-- `create_agent_card(workflow, protocol_version="1.0")` — Create AgentCard from a Workflow
+- `workflow_as_a2a(workflow)` — Expose a Workflow as an A2A agent (v0.3 only)
+- `create_agent_card(workflow)` — Create AgentCard from a Workflow (v0.3 only)
 
 ## Contributing
 
@@ -198,6 +201,8 @@ MIT License - see LICENSE file for details.
 
 - Google A2A Team for designing and publishing the open A2A protocol specification
 - LlamaIndex community for the MCP integration pattern this builds upon
+
+**Disclaimer:** This is an independent community implementation. It is not affiliated with, endorsed by, or developed in collaboration with Google or the A2A team.
 
 ## Built with
 

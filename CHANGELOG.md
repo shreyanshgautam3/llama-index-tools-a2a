@@ -1,28 +1,31 @@
 ## [0.1.4] - 2026-11-16
 
-### Fixed - Critical A2A v1.0 Protocol Compliance
-- **v1.0 Method Names**: Client now uses correct `SendMessage` and `GetTask` (PascalCase) instead of v0.3 `message/send`/`tasks/get`
+### Fixed - Critical A2A Protocol Compliance
+- **v1.0 Client Method Names**: Client now uses correct `SendMessage` and `GetTask` (PascalCase) instead of v0.3 `message/send`/`tasks/get`
 - **v1.0 Part Structure**: Removed `kind` field from Parts — now uses discriminated union (`TextPart`, `FilePart`, `DataPart`) per v1.0 spec
 - **contextId Placement**: v1.0 `contextId` now correctly placed on `Message` object, not as top-level parameter
 - **Skill Name in Message**: v1.0 `SendMessage` embeds skill name in message text as JSON: `{"skill": "name", "message": "..."}`
-- **Task State Handling**: `get_task()` now properly handles v1.0 states: `input-required`, `failed`, `canceled`
+- **Task State Handling**: `get_task()` and `call_skill()` now properly handle v0.3/v1.0 states: `input-required`, `failed`, `canceled`
 - **v0.3 Method Names Fixed**: Corrected to `message/send` (not `tasks/send` or `messages/send` which don't exist in a2a-sdk 0.3.26)
 - **Version Detection**: Auto-detection now ONLY checks `supportedInterfaces` (wire format), not `additionalInterfaces` (a2a-sdk internal)
 - **Dead Code Removed**: `DefaultInMemoryTokenStorage`, `auth` parameter, `tool_call_logs_callback` parameter, unused imports
 - **Streaming Claim Fixed**: Server now correctly advertises `streaming: false` in AgentCapabilities
+- **Return Type Consistency**: `call_skill` and `send_message` both return `TaskOutput` for v1.0 (not raw `Artifact`)
+- **Message Response Handling**: Both methods now handle `message/send` and `SendMessage` returning `Message` instead of `Task`
+- **Removed v1.0 Server Support**: Inbound server only produces v0.3 AgentCards (a2a-sdk 0.3.26 limitation). `protocol_version="1.0"` now raises `NotImplementedError`.
 
 ### Added
 - **9 Integration Tests** (`tests/test_integration.py`): Full client-server round-trip verification
   - v0.3: `message/send` → `tasks/get` flow
-  - v1.0: AgentCard with `supportedInterfaces` format + v0.3 methods
-  - Version auto-detection from AgentCard
+  - Version auto-detection from AgentCard (v0.3 only, since server only produces v0.3)
   - `BasicA2AClient.call_skill()` against real server
-- **12 v1.0 Protocol Tests** (`tests/test_client_v10.py`): Unit tests for v1.0 compliance
+- **12 v1.0 Client Protocol Tests** (`tests/test_client_v10.py`): Unit tests for v1.0 outbound client compliance
 
 ### Changed
-- **AgentCard Serialization**: Local `AgentCard` model now properly outputs `supportedInterfaces` (wire format) for v1.0 via route override
-- **Skill Model**: `id` field now optional with default factory (was required, breaking tests)
-- **v0.3 call_skill**: Arguments serialized as JSON (not Python str repr)
+- **Skill Model**: `input_schema` and `output_schema` default to `None` (not empty dict) to match A2A spec
+- **v0.3 call_skill**: Arguments serialized as JSON (not Python str repr); accepts `message` key from A2AToolSpec
+- **Inbound Server**: Simplified to v0.3 only; removed `protocol_version` parameter from `workflow_as_a2a` and `create_agent_card`
+- **README**: Updated to honestly reflect v0.3 server limitation; v1.0 client paths marked as experimental
 
 ## [0.1.3] - 2026-11-15
 

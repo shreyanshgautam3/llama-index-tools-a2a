@@ -40,7 +40,7 @@ from a2a.types import (
 )
 
 # Use our local AgentCard model which has supported_interfaces for v1.0 wire format
-from llama_index.tools.a2a.models import (
+from .models import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
@@ -188,11 +188,16 @@ def create_agent_card(
 
     Args:
         protocol_version: "0.3" for v0.3 format (url + preferred_transport).
-                          "1.0" for v1.0 AgentCard format (supportedInterfaces) --
-                          NOTE: underlying a2a-sdk 0.3.26 only handles v0.3 method names
-                          (message/send, tasks/get). Use "1.0" only for AgentCard format
-                          compatibility with v1.0 clients; method calls will still use v0.3.
+                          "1.0" is NOT SUPPORTED by a2a-sdk 0.3.26.
+                          The underlying a2a-sdk 0.3.26 only handles v0.3 method names
+                          (message/send, tasks/get). Do not use "1.0" - it will raise NotImplementedError.
     """
+    if protocol_version == "1.0":
+        raise NotImplementedError(
+            "protocol_version='1.0' is not supported by a2a-sdk 0.3.26. "
+            "The server can only handle v0.3 method names (message/send, tasks/get). "
+            "Use protocol_version='0.3' (default)."
+        )
     name = workflow_name or workflow.__class__.__name__
     description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow Agent"
 
@@ -209,8 +214,8 @@ def create_agent_card(
         description=description,
         tags=["workflow", "llama-index"],
         examples=[f"Run {name} workflow"],
-        input_modes=["text", "application/json"],
-        output_modes=["text", "application/json"],
+        input_modes=["text/plain", "application/json"],
+        output_modes=["text/plain", "application/json"],
     )
 
     # Create our local AgentCard model for discovery/serialization
@@ -219,62 +224,28 @@ def create_agent_card(
         organization="LlamaIndex", url="https://github.com/run-llama/llama_index"
     )
 
-    if protocol_version == "1.0":
-        # v1.0 AgentCard format: supportedInterfaces (wire format field name)
-        # NOTE: This only changes the AgentCard format. The underlying a2a-sdk 0.3.26
-        # request handler only supports v0.3 method names (message/send, tasks/get).
-        # We use supported_interfaces (alias supportedInterfaces) for v1.0 wire compatibility.
-        agent_card = AgentCard(
-            name=name,
-            description=description,
-            version=version,
-            url=url,  # Still included for compatibility
-            skills=[Skill(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                tags=skill.tags,
-                examples=skill.examples,
-                input_modes=skill.input_modes,
-                output_modes=skill.output_modes,
-                input_schema={},
-                output_schema={},
-            )],
-            capabilities=capabilities,
-            provider=provider,
-            default_input_modes=["text", "application/json"],
-            default_output_modes=["text", "application/json"],
-            supported_interfaces=[
-                AgentInterface(
-                    transport="JSONRPC",
-                    url=url,
-                )
-            ],
-        )
-    else:
-        # v0.3 format: url + preferred_transport
-        agent_card = AgentCard(
-            name=name,
-            description=description,
-            version=version,
-            url=url,
-            skills=[Skill(
-                id=skill.id,
-                name=skill.name,
-                description=skill.description,
-                tags=skill.tags,
-                examples=skill.examples,
-                input_modes=skill.input_modes,
-                output_modes=skill.output_modes,
-                input_schema={},
-                output_schema={},
-            )],
-            capabilities=capabilities,
-            provider=provider,
-            default_input_modes=["text", "application/json"],
-            default_output_modes=["text", "application/json"],
-            preferred_transport="JSONRPC",
-        )
+    # v0.3 format only (v1.0 not supported by a2a-sdk 0.3.26)
+    agent_card = AgentCard(
+        name=name,
+        description=description,
+        version=version,
+        url=url,
+        skills=[Skill(
+            id=skill.id,
+            name=skill.name,
+            description=skill.description,
+            tags=skill.tags,
+            examples=skill.examples,
+            input_modes=skill.input_modes,
+            output_modes=skill.output_modes,
+            # input_schema and output_schema are not standard A2A fields; omit them
+        )],
+        capabilities=capabilities,
+        provider=provider,
+        default_input_modes=["text/plain", "application/json"],
+        default_output_modes=["text/plain", "application/json"],
+        preferred_transport="JSONRPC",
+    )
 
     return agent_card
 
@@ -290,8 +261,8 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
             description=s.description,
             tags=s.tags or ["workflow", "llama-index"],
             examples=[],
-            input_modes=["text", "application/json"],
-            output_modes=["text", "application/json"],
+            input_modes=s.input_modes or ["text/plain", "application/json"],
+            output_modes=s.output_modes or ["text/plain", "application/json"],
         ))
 
     # Convert capabilities
@@ -308,7 +279,7 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
         url=local_card.provider.url if local_card.provider else "https://github.com/run-llama/llama_index",
     )
 
-    # Build a2a-sdk AgentCard
+    # Build a2a-sdk AgentCard (v0.3 format only)
     a2a_card_data = {
         "name": local_card.name,
         "description": local_card.description,
@@ -317,22 +288,10 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
         "skills": a2a_skills,
         "capabilities": a2a_capabilities,
         "provider": a2a_provider,
-        "default_input_modes": local_card.default_input_modes or ["text", "application/json"],
-        "default_output_modes": local_card.default_output_modes or ["text", "application/json"],
+        "default_input_modes": local_card.default_input_modes or ["text/plain", "application/json"],
+        "default_output_modes": local_card.default_output_modes or ["text/plain", "application/json"],
+        "preferred_transport": local_card.preferred_transport or "JSONRPC",
     }
-
-    if protocol_version == "1.0":
-        # v1.0: use additional_interfaces (a2a-sdk field name)
-        a2a_interfaces = []
-        for iface in (local_card.supported_interfaces or []):
-            a2a_interfaces.append({
-                "transport": iface.transport,
-                "url": iface.url,
-            })
-        a2a_card_data["additional_interfaces"] = a2a_interfaces
-    else:
-        # v0.3: use preferred_transport
-        a2a_card_data["preferred_transport"] = local_card.preferred_transport or "JSONRPC"
 
     return A2AAgentCard(**a2a_card_data)
 
@@ -344,7 +303,6 @@ def workflow_as_a2a(
     start_event_model: type[BaseModel] | None = None,
     url: str = "http://localhost:8000",
     version: str = "1.0.0",
-    protocol_version: str = "0.3",
     **app_kwargs: Any,
 ) -> Any:
     """
@@ -360,14 +318,14 @@ def workflow_as_a2a(
                            Defaults to workflow._start_event_class.
         url: Base URL where the agent will be hosted.
         version: Version string for the agent card.
-        protocol_version: A2A AgentCard format version ("0.3" or "1.0"). Default: "0.3".
-                          NOTE: The underlying a2a-sdk 0.3.26 only supports v0.3
-                          method names (message/send, tasks/get). Use "1.0" for
-                          AgentCard format compatibility only; method calls use v0.3.
         **app_kwargs: Additional kwargs passed to FastAPI constructor.
 
     Returns:
         A FastAPI application with A2A routes configured.
+
+    Note:
+        The underlying a2a-sdk 0.3.26 only supports v0.3 method names
+        (message/send, tasks/get). v1.0 AgentCard format is not supported.
 
     Example:
         >>> from llama_index.core.workflow import Workflow, StartEvent, StopEvent
@@ -383,7 +341,7 @@ def workflow_as_a2a(
         >>> app = workflow_as_a2a(MyWorkflow())
         >>> # Run: uvicorn my_app:app --host 0.0.0.0 --port 8000
     """
-    # Create AgentCard (local model for discovery/serialization)
+    # Create AgentCard (local model for discovery/serialization) - v0.3 only
     local_agent_card = create_agent_card(
         workflow=workflow,
         workflow_name=workflow_name,
@@ -391,11 +349,11 @@ def workflow_as_a2a(
         start_event_model=start_event_model,
         url=url,
         version=version,
-        protocol_version=protocol_version,
+        protocol_version="0.3",
     )
 
     # Convert to a2a-sdk AgentCard for A2AFastAPIApplication
-    a2a_agent_card = _to_a2a_agent_card(local_agent_card, protocol_version)
+    a2a_agent_card = _to_a2a_agent_card(local_agent_card, "0.3")
 
     # Create executor
     executor = WorkflowAgentExecutor(

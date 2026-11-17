@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from llama_index.tools.a2a.models import (
+from .models import (
     AgentCard,
     Message,
     Part,
@@ -191,8 +191,8 @@ class BasicA2AClient:
         response.raise_for_status()
         return response.json()
 
-    async def _send_v03_request(self, endpoint: str, method: str, params: dict) -> dict:
-        """Send a v0.3 JSON-RPC request."""
+    async def _send_v03_request(self, method: str, params: dict) -> dict:
+        """Send a v0.3 JSON-RPC request to the base URL (not skill-specific endpoint)."""
         client = await self._get_http_client()
         request_payload = {
             "jsonrpc": "2.0",
@@ -201,7 +201,7 @@ class BasicA2AClient:
             "params": params,
         }
         response = await client.post(
-            endpoint, json=request_payload, headers=self._get_request_headers()
+            self.base_url, json=request_payload, headers=self._get_request_headers()
         )
         response.raise_for_status()
         return response.json()
@@ -269,13 +269,48 @@ class BasicA2AClient:
             # v1.0 SendMessage returns either task or message
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
-                artifact = send_result.task.artifacts[0] if send_result.task.artifacts else None
+                task = send_result.task
+                # Check task state
+                task_state = task.status.state if task.status else "unknown"
+                if task_state == "input-required":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32001,
+                            "message": "Task requires additional input",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "failed":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32002,
+                            "message": "Task failed",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "canceled":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32003,
+                            "message": "Task was canceled",
+                            "data": {"state": task_state},
+                        },
+                    )
+                # Return ALL artifacts combined
+                all_parts = []
+                if task.artifacts:
+                    for artifact in task.artifacts:
+                        all_parts.extend(artifact.parts)
                 return TaskResult(
-                    task_id=send_result.task.id,
-                    output=TaskOutput(parts=artifact.parts) if artifact else None,
-                    metadata=send_result.task.metadata,
+                    task_id=task.id,
+                    output=TaskOutput(parts=all_parts) if all_parts else None,
+                    metadata=task.metadata,
                 )
             elif send_result.message:
+                # SendMessage returned a Message directly (not a Task)
                 return TaskResult(
                     task_id="",
                     output=TaskOutput(parts=send_result.message.parts),
@@ -283,19 +318,26 @@ class BasicA2AClient:
             return TaskResult(task_id="")
         else:
             # v0.3: Use message/send with task-like input structure
-            # Serialize arguments as proper JSON (not Python str repr)
+            # For v0.3, there's no standard "skill" concept - the skill is implicit from the card.
+            # The message text should be the workflow input directly.
+            # If arguments has a "message" key, use its value as the message text.
+            # Otherwise, JSON-serialize the entire arguments dict.
             import json
-            message_text = json.dumps(arguments) if arguments else "{}"
+            import uuid
+
+            if arguments and "message" in arguments and isinstance(arguments["message"], str):
+                # Called from A2AToolSpec: message is the actual text to send
+                message_text = arguments["message"]
+            else:
+                # Direct call_skill call: serialize the arguments as workflow input
+                message_text = json.dumps(arguments) if arguments else "{}"
+
             input_parts = self._build_v03_parts(message_text)
 
-            skill_endpoint = card.url
-            for skill in card.skills:
-                if skill.name == skill_name:
-                    skill_endpoint = skill.endpoint or card.url
-                    break
+            # v0.3 uses base URL, not skill-specific endpoint (endpoint is not an A2A field)
+            # v0.3 has no standard way to specify skill - it's implicit from the card
 
             # v0.3 requires messageId in the message object
-            import uuid
             params = {
                 "message": {
                     "messageId": f"msg-{uuid.uuid4().hex[:8]}",
@@ -303,23 +345,54 @@ class BasicA2AClient:
                     "parts": input_parts,
                 }
             }
-            result = await self._send_v03_request(skill_endpoint, "message/send", params)
+            result = await self._send_v03_request("message/send", params)
             raw_result = result.get("result", {})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
             # v0.3 returns a full Task object - convert to TaskResult
             task_id = raw_result.get("id") or raw_result.get("task_id") or ""
+
+            # Check task state for v0.3
+            task_state = raw_result.get("status", {}).get("state", "unknown")
+            if task_state == "input-required":
+                return TaskResult(
+                    task_id=task_id,
+                    error={
+                        "code": -32001,
+                        "message": "Task requires additional input",
+                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                    },
+                )
+            if task_state == "failed":
+                return TaskResult(
+                    task_id=task_id,
+                    error={
+                        "code": -32002,
+                        "message": "Task failed",
+                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                    },
+                )
+            if task_state == "canceled":
+                return TaskResult(
+                    task_id=task_id,
+                    error={
+                        "code": -32003,
+                        "message": "Task was canceled",
+                        "data": {"state": task_state},
+                    },
+                )
+
             artifacts = raw_result.get("artifacts", [])
             output = None
             if artifacts:
-                # Get parts from first artifact
-                parts = artifacts[0].get("parts", [])
-                # Convert v0.3 parts (with 'kind') to our Part model
-                converted_parts = []
-                for p in parts:
-                    if "text" in p:
-                        converted_parts.append(TextPart(text=p["text"]))
-                output = TaskOutput(parts=converted_parts)
+                # Get parts from ALL artifacts
+                all_parts = []
+                for artifact in artifacts:
+                    parts = artifact.get("parts", [])
+                    for p in parts:
+                        if "text" in p:
+                            all_parts.append(TextPart(text=p["text"]))
+                output = TaskOutput(parts=all_parts) if all_parts else None
             return TaskResult(
                 task_id=task_id,
                 output=output,
@@ -358,33 +431,132 @@ class BasicA2AClient:
             raw_result = result.get("result", {})
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
+                task = send_result.task
+                # Check task state
+                task_state = task.status.state if task.status else "unknown"
+                if task_state == "input-required":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32001,
+                            "message": "Task requires additional input",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "failed":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32002,
+                            "message": "Task failed",
+                            "data": {"state": task_state, "message": task.status.message},
+                        },
+                    )
+                if task_state == "canceled":
+                    return TaskResult(
+                        task_id=task.id,
+                        error={
+                            "code": -32003,
+                            "message": "Task was canceled",
+                            "data": {"state": task_state},
+                        },
+                    )
+                # Wrap in TaskOutput for consistency with call_skill - return ALL artifacts
+                all_parts = []
+                if task.artifacts:
+                    for artifact in task.artifacts:
+                        all_parts.extend(artifact.parts)
                 return TaskResult(
-                    task_id=send_result.task.id,
-                    output=send_result.task.artifacts[0] if send_result.task.artifacts else None,
-                    metadata=send_result.task.metadata,
+                    task_id=task.id,
+                    output=TaskOutput(parts=all_parts) if all_parts else None,
+                    metadata=task.metadata,
                 )
             elif send_result.message:
+                # SendMessage returned a Message directly (not a Task)
                 return TaskResult(
-                    task_id=send_result.task.id if send_result.task else "",
+                    task_id="",
                     output=TaskOutput(parts=send_result.message.parts),
                 )
             return TaskResult(task_id="")
         else:
             # v0.3: Use message/send
+            import uuid
             params = {
                 "message": {
+                    "messageId": f"msg-{uuid.uuid4().hex[:8]}",
                     "role": "user",
                     "parts": self._build_v03_parts(message),
                 }
             }
-            if context_id:
-                params["contextId"] = context_id
+            # v0.3: contextId is NOT a top-level param; it goes inside message if needed
 
-            result = await self._send_v03_request(card.url, "message/send", params)
+            result = await self._send_v03_request("message/send", params)
             raw_result = result.get("result", {})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
-            return TaskResult.model_validate(raw_result)
+
+            # Check task state for v0.3
+            task_state = raw_result.get("status", {}).get("state", "unknown")
+            if task_state == "input-required":
+                return TaskResult(
+                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
+                    error={
+                        "code": -32001,
+                        "message": "Task requires additional input",
+                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                    },
+                )
+            if task_state == "failed":
+                return TaskResult(
+                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
+                    error={
+                        "code": -32002,
+                        "message": "Task failed",
+                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                    },
+                )
+            if task_state == "canceled":
+                return TaskResult(
+                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
+                    error={
+                        "code": -32003,
+                        "message": "Task was canceled",
+                        "data": {"state": task_state},
+                    },
+                )
+
+            # Handle case where message/send returns a Message instead of a Task
+            if "artifacts" not in raw_result and "parts" in raw_result:
+                # It's a Message response
+                parts = raw_result.get("parts", [])
+                converted_parts = []
+                for p in parts:
+                    if "text" in p:
+                        converted_parts.append(TextPart(text=p["text"]))
+                return TaskResult(
+                    task_id="",
+                    output=TaskOutput(parts=converted_parts),
+                )
+
+            # Convert Task to TaskResult (same logic as call_skill)
+            task_id = raw_result.get("id") or raw_result.get("task_id") or ""
+            artifacts = raw_result.get("artifacts", [])
+            output = None
+            if artifacts:
+                # Return ALL artifacts combined
+                all_parts = []
+                for artifact in artifacts:
+                    parts = artifact.get("parts", [])
+                    for p in parts:
+                        if "text" in p:
+                            all_parts.append(TextPart(text=p["text"]))
+                output = TaskOutput(parts=all_parts) if all_parts else None
+            return TaskResult(
+                task_id=task_id,
+                output=output,
+                error=None,
+                metadata=raw_result.get("metadata", {}),
+            )
 
     async def get_task(self, task_id: str) -> TaskResult:
         """
@@ -444,9 +616,14 @@ class BasicA2AClient:
                             "data": {"state": task_state},
                         },
                     )
+                # Return ALL artifacts combined
+                all_parts = []
+                if task.artifacts:
+                    for artifact in task.artifacts:
+                        all_parts.extend(artifact.parts)
                 return TaskResult(
                     task_id=task.id,
-                    output=task.artifacts[0] if task.artifacts else None,
+                    output=TaskOutput(parts=all_parts) if all_parts else None,
                     metadata=task.metadata,
                 )
             except Exception as e:
@@ -455,8 +632,7 @@ class BasicA2AClient:
                     error={"code": -32603, "message": f"Failed to parse task result: {e}"},
                 )
         else:
-            skill_endpoint = card.url
-            result = await self._send_v03_request(skill_endpoint, "tasks/get", {"id": task_id})
+            result = await self._send_v03_request("tasks/get", {"id": task_id})
             if "error" in result:
                 return TaskResult(
                     task_id=task_id,

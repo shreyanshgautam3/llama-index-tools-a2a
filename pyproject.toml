@@ -1,5 +1,7 @@
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling",
+]
 build-backend = "hatchling.build"
 
 [project]
@@ -10,7 +12,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10,<4.0"
 authors = [
-    {name = "Shreyansh Gautam", email = "shreyanshgautam@gmail.com"}
+    { name = "Shreyansh Gautam", email = "shreyanshgautam@gmail.com" },
 ]
 keywords = [
     "a2a",
@@ -56,17 +58,32 @@ Repository = "https://github.com/shreyanshgautam3/llama-index-tools-a2a.git"
 Issues = "https://github.com/shreyanshgautam3/llama-index-tools-a2a/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["llama_index/tools/a2a"]
+packages = [
+    "llama_index",
+    "llama_index.tools",
+    "llama_index.tools.a2a_tools",
+]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "UP",
+    "B",
+    "C4",
+]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "strict"
 

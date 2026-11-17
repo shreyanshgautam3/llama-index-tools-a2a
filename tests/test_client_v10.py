@@ -3,10 +3,11 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
-from llama_index.tools.a2a.client import BasicA2AClient
-from llama_index.tools.a2a.models import (
+from llama_index.tools.a2a_tools.client import BasicA2AClient
+from llama_index.tools.a2a_tools.models import (
     AgentCard,
     AgentInterface,
     Skill,
@@ -503,3 +504,283 @@ async def test_v10_parts_no_kind_field():
             for part in parts:
                 assert "kind" not in part
                 assert "text" in part
+
+
+# =============================================================================
+# Fake v1.0 Server Tests using httpx.MockTransport
+# These tests verify the v1.0 client works against a simulated v1.0 server
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_v10_fake_server_call_skill():
+    """Test v1.0 call_skill against a fake v1.0 server using MockTransport."""
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        # httpx.MockTransport gives relative URL path
+        url_path = str(request.url)
+        if url_path.endswith("/.well-known/agent-card.json"):
+            return httpx.Response(200, json={
+                "name": "FakeV10Agent",
+                "url": "http://fake.example.com",
+                "skills": [{"name": "fake-skill", "description": "A fake skill"}],
+                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
+            })
+
+        # POST to root path
+        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+            body = json.loads(request.content)
+            if body.get("method") == "SendMessage":
+                # Verify A2A-Version header
+                assert request.headers.get("A2A-Version") == "1.0"
+                # Verify method name
+                assert body["method"] == "SendMessage"
+                # Verify contextId is on Message, not top-level
+                assert "contextId" not in body["params"]
+                assert "message" in body["params"]
+                assert body["params"]["message"]["context_id"] == "ctx-test"
+                # Verify skill_name embedded in message text
+                msg_text = body["params"]["message"]["parts"][0]["text"]
+                msg_data = json.loads(msg_text)
+                assert msg_data["skill"] == "fake-skill"
+                assert msg_data["message"] == "test message"
+                # Verify no 'kind' field in parts
+                assert "kind" not in body["params"]["message"]["parts"][0]
+
+                return httpx.Response(200, json={
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "task": {
+                            "id": "task-fake-1",
+                            "context_id": "ctx-test",
+                            "status": {"state": "completed", "timestamp": "2024-01-01T00:00:00Z"},
+                            "artifacts": [
+                                {"artifact_id": "art-1", "parts": [{"text": "artifact 1"}], "index": 0},
+                                {"artifact_id": "art-2", "parts": [{"text": "artifact 2"}], "index": 1},
+                            ],
+                        }
+                    },
+                    "id": body.get("id"),
+                })
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(mock_handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+        client = BasicA2AClient(
+            "http://fake.example.com/.well-known/agent-card.json",
+            protocol_version="1.0",
+        )
+        client._http_client = http_client
+        await client.get_agent_card()
+
+        assert client.protocol_version == "1.0"
+
+        result = await client.call_skill("fake-skill", arguments={"message": "test message", "context_id": "ctx-test"})
+
+        assert result.task_id == "task-fake-1"
+        assert result.output is not None
+        # Should return ALL artifacts combined
+        assert len(result.output.parts) == 2
+        assert result.output.parts[0].text == "artifact 1"
+        assert result.output.parts[1].text == "artifact 2"
+
+
+@pytest.mark.asyncio
+async def test_v10_fake_server_send_message():
+    """Test v1.0 send_message against a fake v1.0 server using MockTransport."""
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        url_path = str(request.url)
+        if url_path.endswith("/.well-known/agent-card.json"):
+            return httpx.Response(200, json={
+                "name": "FakeV10Agent",
+                "url": "http://fake.example.com",
+                "skills": [],
+                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
+            })
+
+        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+            body = json.loads(request.content)
+            if body.get("method") == "SendMessage":
+                assert request.headers.get("A2A-Version") == "1.0"
+                assert body["method"] == "SendMessage"
+                assert "contextId" not in body["params"]
+                assert body["params"]["message"]["context_id"] == "ctx-send"
+                assert "kind" not in body["params"]["message"]["parts"][0]
+
+                # Return a Message response (not a Task)
+                return httpx.Response(200, json={
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "message": {
+                            "role": "assistant",
+                            "parts": [{"text": "direct response"}],
+                            "contextId": "ctx-send",
+                        }
+                    },
+                    "id": body.get("id"),
+                })
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(mock_handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+        client = BasicA2AClient(
+            "http://fake.example.com/.well-known/agent-card.json",
+            protocol_version="1.0",
+        )
+        client._http_client = http_client
+        await client.get_agent_card()
+
+        result = await client.send_message("Hello", context_id="ctx-send")
+
+        assert result.task_id == ""
+        assert result.output is not None
+        assert result.output.parts[0].text == "direct response"
+
+
+@pytest.mark.asyncio
+async def test_v10_fake_server_get_task_states():
+    """Test v1.0 get_task handles all terminal states against fake server."""
+    async def make_handler(state: str, message_text: str = ""):
+        async def mock_handler(request: httpx.Request) -> httpx.Response:
+            url_path = str(request.url)
+            if url_path.endswith("/.well-known/agent-card.json"):
+                return httpx.Response(200, json={
+                    "name": "FakeV10Agent",
+                    "url": "http://fake.example.com",
+                    "skills": [],
+                    "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
+                })
+
+            if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+                body = json.loads(request.content)
+                if body.get("method") == "GetTask":
+                    assert request.headers.get("A2A-Version") == "1.0"
+                    assert body["method"] == "GetTask"
+                    assert body["params"]["id"] == "task-state-test"
+
+                    if state == "input-required":
+                        return httpx.Response(200, json={
+                            "jsonrpc": "2.0",
+                            "result": {
+                                "id": "task-state-test",
+                                "context_id": "ctx-test",
+                                "status": {
+                                    "state": "input-required",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                    "message": {
+                                        "role": "assistant",
+                                        "parts": [{"text": message_text}],
+                                        "message_id": "msg-1",
+                                    },
+                                },
+                            },
+                            "id": body.get("id"),
+                        })
+                    elif state == "failed":
+                        return httpx.Response(200, json={
+                            "jsonrpc": "2.0",
+                            "result": {
+                                "id": "task-state-test",
+                                "context_id": "ctx-test",
+                                "status": {
+                                    "state": "failed",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                    "message": {
+                                        "role": "assistant",
+                                        "parts": [{"text": message_text}],
+                                        "message_id": "msg-1",
+                                    },
+                                },
+                            },
+                            "id": body.get("id"),
+                        })
+                    elif state == "canceled":
+                        return httpx.Response(200, json={
+                            "jsonrpc": "2.0",
+                            "result": {
+                                "id": "task-state-test",
+                                "context_id": "ctx-test",
+                                "status": {
+                                    "state": "canceled",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                },
+                            },
+                            "id": body.get("id"),
+                        })
+
+            return httpx.Response(404)
+        return mock_handler
+
+    for state, expected_code in [("input-required", -32001), ("failed", -32002), ("canceled", -32003)]:
+        transport = httpx.MockTransport(await make_handler(state, f"State: {state}"))
+        async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+            client = BasicA2AClient(
+                "http://fake.example.com/.well-known/agent-card.json",
+                protocol_version="1.0",
+            )
+            client._http_client = http_client
+            await client.get_agent_card()
+
+            result = await client.get_task("task-state-test")
+
+            assert result.error is not None
+            assert result.error["code"] == expected_code
+            # Error message contains the state description, not the state code
+            if state == "input-required":
+                assert "input" in result.error["message"].lower()
+            else:
+                assert state in result.error["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_v10_fake_server_multiple_artifacts():
+    """Test v1.0 client returns ALL artifacts, not just first."""
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        url_path = str(request.url)
+        if url_path.endswith("/.well-known/agent-card.json"):
+            return httpx.Response(200, json={
+                "name": "FakeV10Agent",
+                "url": "http://fake.example.com",
+                "skills": [{"name": "multi-skill", "description": "Multi-artifact skill"}],
+                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
+            })
+
+        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+            body = json.loads(request.content)
+            if body.get("method") == "SendMessage":
+                return httpx.Response(200, json={
+                    "jsonrpc": "2.0",
+                    "result": {
+                        "task": {
+                            "id": "task-multi",
+                            "context_id": "ctx-multi",
+                            "status": {"state": "completed", "timestamp": "2024-01-01T00:00:00Z"},
+                            "artifacts": [
+                                {"artifact_id": "art-1", "parts": [{"text": "part 1"}], "index": 0},
+                                {"artifact_id": "art-2", "parts": [{"text": "part 2"}], "index": 1},
+                                {"artifact_id": "art-3", "parts": [{"text": "part 3"}], "index": 2},
+                            ],
+                        }
+                    },
+                    "id": body.get("id"),
+                })
+
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(mock_handler)
+    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+        client = BasicA2AClient(
+            "http://fake.example.com/.well-known/agent-card.json",
+            protocol_version="1.0",
+        )
+        client._http_client = http_client
+        await client.get_agent_card()
+
+        result = await client.call_skill("multi-skill", arguments={"message": "test"})
+
+        assert result.task_id == "task-multi"
+        assert result.output is not None
+        # Should return ALL 3 artifacts combined
+        assert len(result.output.parts) == 3
+        assert [p.text for p in result.output.parts] == ["part 1", "part 2", "part 3"]
