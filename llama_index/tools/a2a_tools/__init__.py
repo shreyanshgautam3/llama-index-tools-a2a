@@ -10,23 +10,26 @@ Inbound: Expose a Workflow as an A2A-capable ASGI app
 
 # Use relative imports to avoid circular import issues
 # Import models first (no dependencies on other modules in this package)
+# Import base (depends only on models)
+from .base import A2AToolSpec
+
+# Import client (depends only on models)
+from .client import BasicA2AClient
 from .models import (
-    AgentCard,
     AgentCapabilities,
+    AgentCard,
     AgentInterface,
     AgentProvider,
     Skill,
 )
-# Import base (depends only on models)
-from .base import A2AToolSpec
-# Import client (depends only on models)
-from .client import BasicA2AClient
+
 # Import server (depends on models, a2a-sdk)
 from .server import (
     WorkflowAgentExecutor,
     create_agent_card,
     workflow_as_a2a,
 )
+
 # Import utils (depends on base and client)
 from .utils import (
     aget_tools_from_a2a_card,
@@ -41,4 +44,10 @@ __all__ = [
     "WorkflowAgentExecutor",
     "get_tools_from_a2a_card",
     "aget_tools_from_a2a_card",
+    # Models re-exported
+    "AgentCard",
+    "AgentCapabilities",
+    "AgentInterface",
+    "AgentProvider",
+    "Skill",
 ]

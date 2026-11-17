@@ -45,7 +45,7 @@ async def test_v03_client_server_roundtrip():
 
 @pytest.mark.asyncio
 async def test_v10_agent_card_format_not_supported():
-    """Test that v1.0 AgentCard format is NOT supported by the server (a2a-sdk 0.3.26 limitation)."""
+    """Test that v1.0 AgentCard format is NOT supported by server (sdk limitation)."""
     # v1.0 is not supported - create_agent_card should raise NotImplementedError
     from llama_index.tools.a2a_tools.server import create_agent_card
     with pytest.raises(NotImplementedError):

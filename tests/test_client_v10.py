@@ -554,8 +554,10 @@ async def test_v10_fake_server_call_skill():
                             "context_id": "ctx-test",
                             "status": {"state": "completed", "timestamp": "2024-01-01T00:00:00Z"},
                             "artifacts": [
-                                {"artifact_id": "art-1", "parts": [{"text": "artifact 1"}], "index": 0},
-                                {"artifact_id": "art-2", "parts": [{"text": "artifact 2"}], "index": 1},
+                                {"artifact_id": "art-1",
+                                 "parts": [{"text": "artifact 1"}], "index": 0},
+                                {"artifact_id": "art-2",
+                                 "parts": [{"text": "artifact 2"}], "index": 1},
                             ],
                         }
                     },
@@ -565,17 +567,22 @@ async def test_v10_fake_server_call_skill():
         return httpx.Response(404)
 
     transport = httpx.MockTransport(mock_handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://fake.example.com"
+    ) as client_http:
         client = BasicA2AClient(
             "http://fake.example.com/.well-known/agent-card.json",
             protocol_version="1.0",
         )
-        client._http_client = http_client
+        client._http_client = client_http
         await client.get_agent_card()
 
         assert client.protocol_version == "1.0"
 
-        result = await client.call_skill("fake-skill", arguments={"message": "test message", "context_id": "ctx-test"})
+        result = await client.call_skill(
+            "fake-skill",
+            arguments={"message": "test message", "context_id": "ctx-test"},
+        )
 
         assert result.task_id == "task-fake-1"
         assert result.output is not None
@@ -623,12 +630,14 @@ async def test_v10_fake_server_send_message():
         return httpx.Response(404)
 
     transport = httpx.MockTransport(mock_handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://fake.example.com"
+    ) as client_http:
         client = BasicA2AClient(
             "http://fake.example.com/.well-known/agent-card.json",
             protocol_version="1.0",
         )
-        client._http_client = http_client
+        client._http_client = client_http
         await client.get_agent_card()
 
         result = await client.send_message("Hello", context_id="ctx-send")
@@ -649,7 +658,9 @@ async def test_v10_fake_server_get_task_states():
                     "name": "FakeV10Agent",
                     "url": "http://fake.example.com",
                     "skills": [],
-                    "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
+                    "supportedInterfaces": [
+                        {"url": "http://fake.example.com", "transport": "JSONRPC"},
+                    ],
                 })
 
             if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
@@ -712,14 +723,21 @@ async def test_v10_fake_server_get_task_states():
             return httpx.Response(404)
         return mock_handler
 
-    for state, expected_code in [("input-required", -32001), ("failed", -32002), ("canceled", -32003)]:
+    states = [
+        ("input-required", -32001),
+        ("failed", -32002),
+        ("canceled", -32003),
+    ]
+    for state, expected_code in states:
         transport = httpx.MockTransport(await make_handler(state, f"State: {state}"))
-        async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://fake.example.com"
+        ) as client_http:
             client = BasicA2AClient(
                 "http://fake.example.com/.well-known/agent-card.json",
                 protocol_version="1.0",
             )
-            client._http_client = http_client
+            client._http_client = client_http
             await client.get_agent_card()
 
             result = await client.get_task("task-state-test")
@@ -769,12 +787,14 @@ async def test_v10_fake_server_multiple_artifacts():
         return httpx.Response(404)
 
     transport = httpx.MockTransport(mock_handler)
-    async with httpx.AsyncClient(transport=transport, base_url="http://fake.example.com") as http_client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://fake.example.com"
+    ) as client_http:
         client = BasicA2AClient(
             "http://fake.example.com/.well-known/agent-card.json",
             protocol_version="1.0",
         )
-        client._http_client = http_client
+        client._http_client = client_http
         await client.get_agent_card()
 
         result = await client.call_skill("multi-skill", arguments={"message": "test"})

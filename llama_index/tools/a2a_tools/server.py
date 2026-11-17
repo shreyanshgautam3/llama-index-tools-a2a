@@ -10,9 +10,6 @@ Supports both A2A protocol v0.3 and v1.0 via method name handling.
 
 from typing import Any
 
-from llama_index.core.workflow import StartEvent, Workflow
-from pydantic import BaseModel
-
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AFastAPIApplication
 from a2a.server.events import EventQueue
@@ -38,12 +35,13 @@ from a2a.types import (
     TaskStatusUpdateEvent,
     TextPart,
 )
+from llama_index.core.workflow import StartEvent, Workflow
+from pydantic import BaseModel
 
 # Use our local AgentCard model which has supported_interfaces for v1.0 wire format
 from .models import (
     AgentCapabilities,
     AgentCard,
-    AgentInterface,
     AgentProvider,
     Skill,
 )
@@ -190,7 +188,8 @@ def create_agent_card(
         protocol_version: "0.3" for v0.3 format (url + preferred_transport).
                           "1.0" is NOT SUPPORTED by a2a-sdk 0.3.26.
                           The underlying a2a-sdk 0.3.26 only handles v0.3 method names
-                          (message/send, tasks/get). Do not use "1.0" - it will raise NotImplementedError.
+                          (message/send, tasks/get).
+                          Do not use "1.0" - it will raise NotImplementedError.
     """
     if protocol_version == "1.0":
         raise NotImplementedError(
@@ -288,8 +287,10 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
         "skills": a2a_skills,
         "capabilities": a2a_capabilities,
         "provider": a2a_provider,
-        "default_input_modes": local_card.default_input_modes or ["text/plain", "application/json"],
-        "default_output_modes": local_card.default_output_modes or ["text/plain", "application/json"],
+        "default_input_modes": local_card.default_input_modes
+        or ["text/plain", "application/json"],
+        "default_output_modes": local_card.default_output_modes
+        or ["text/plain", "application/json"],
         "preferred_transport": local_card.preferred_transport or "JSONRPC",
     }
 

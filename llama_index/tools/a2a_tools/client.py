@@ -247,7 +247,7 @@ class BasicA2AClient:
         Returns:
             The task result containing the output.
         """
-        card = await self._discover_agent_card()
+        await self._discover_agent_card()
 
         if self.protocol_version == "1.0":
             # v1.0: Extract message and context_id from arguments
@@ -360,7 +360,10 @@ class BasicA2AClient:
                     error={
                         "code": -32001,
                         "message": "Task requires additional input",
-                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                        "data": {
+                            "state": task_state,
+                            "message": raw_result.get("status", {}).get("message"),
+                        },
                     },
                 )
             if task_state == "failed":
@@ -369,7 +372,10 @@ class BasicA2AClient:
                     error={
                         "code": -32002,
                         "message": "Task failed",
-                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                        "data": {
+                            "state": task_state,
+                            "message": raw_result.get("status", {}).get("message"),
+                        },
                     },
                 )
             if task_state == "canceled":
@@ -415,7 +421,7 @@ class BasicA2AClient:
         Returns:
             The agent's response as a TaskResult.
         """
-        card = await self._discover_agent_card()
+        await self._discover_agent_card()
 
         if self.protocol_version == "1.0":
             # v1.0: Use SendMessage with contextId on Message
@@ -503,7 +509,10 @@ class BasicA2AClient:
                     error={
                         "code": -32001,
                         "message": "Task requires additional input",
-                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                        "data": {
+                            "state": task_state,
+                            "message": raw_result.get("status", {}).get("message"),
+                        },
                     },
                 )
             if task_state == "failed":
@@ -512,7 +521,10 @@ class BasicA2AClient:
                     error={
                         "code": -32002,
                         "message": "Task failed",
-                        "data": {"state": task_state, "message": raw_result.get("status", {}).get("message")},
+                        "data": {
+                            "state": task_state,
+                            "message": raw_result.get("status", {}).get("message"),
+                        },
                     },
                 )
             if task_state == "canceled":
@@ -568,7 +580,7 @@ class BasicA2AClient:
         Returns:
             The task result.
         """
-        card = await self._discover_agent_card()
+        await self._discover_agent_card()
 
         if not task_id:
             return TaskResult(
