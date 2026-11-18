@@ -121,10 +121,16 @@ This integration mirrors the existing `llama-index-tools-mcp` pattern:
 
 **Important:** The inbound server currently supports **v0.3 only** due to a2a-sdk 0.3.26 limitations.
 
-- **Outbound client** (`BasicA2AClient`): Auto-detects version from AgentCard `supportedInterfaces` field (wire format). Sends `A2A-Version: 1.0` header for v1.0 servers, uses v1.0 method names (`SendMessage`, `GetTask`), falls back to v0.3 methods (`message/send`, `tasks/get`) for compatibility. Force a version with `protocol_version="0.3"` or `"1.0"` constructor argument.
+- **Outbound client** (`BasicA2AClient`): Uses **explicit opt-in** via `protocol_version="1.0"` constructor argument. No auto-detection from AgentCard. When `protocol_version="1.0"`:
+  - Sends `A2A-Version: 1.0` header
+  - Uses v1.0 method names (`SendMessage`, `GetTask`)
+  - Uses camelCase wire format via `by_alias=True`
+  - Places `contextId` on Message object (not top-level)
+  - Puts `skill_name` in `message.metadata` (not embedded in text)
+  - Default (`protocol_version` not specified or `"0.3"`): uses v0.3 method names (`message/send`, `tasks/get`), snake_case wire format
   - v1.0 client paths are **experimental** — they are tested against mocked responses but not against real v1.0 reference servers.
-- **Inbound server** (`workflow_as_a2a`): Generates **v0.3 AgentCard** only (`protocol_version` parameter removed). The underlying a2a-sdk 0.3.26 request handler only processes v0.3 method names (`message/send`, `tasks/get`). Passing `protocol_version="1.0"` raises `NotImplementedError`.
-- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`) with discriminated union Part types (no `kind` field) for outbound client v1.0 support.
+- **Inbound server** (`workflow_as_a2a`): Generates **v0.3 AgentCard** only. The underlying a2a-sdk 0.3.26 request handler only processes v0.3 method names (`message/send`, `tasks/get`).
+- **Models**: Includes v1.0 types (`AgentInterface`, `Task`, `TaskStatus`, `Artifact`, `SendMessageResult`) with discriminated union Part types (no `kind` field) and camelCase aliases for outbound client v1.0 support.
 
 Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions for the outbound client. See [CHANGELOG](CHANGELOG.md) for version history.
 
@@ -156,6 +162,7 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
+- **v0.1.5** (2026-11-18): v1.0 protocol compliance — opt-in v1.0 via `protocol_version="1.0"` (no auto-detection), camelCase wire format via `by_alias=True`, skill_name in `message.metadata` (not embedded in text), contextId on Message object, deduplicated task state mapping, 38 tests passing ✅
 - **v0.1.4** (2026-11-16): Fixed A2A protocol compliance — v1.0 client method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), removed v1.0 server support (a2a-sdk 0.3.26 limitation), 38 tests passing ✅
 - **v0.1.3** (2026-11-15): A2A v1.0 dual-version support (experimental), multi-turn contextId, honest feature naming, FunctionAgent examples ✅
 - **v0.1.2** (2026-11-14): CI stability — strict asyncio mode, debug output, protocol version docs ✅

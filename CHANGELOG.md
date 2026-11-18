@@ -1,3 +1,21 @@
+## [0.1.5] - 2026-11-18
+
+### Fixed - v1.0 Protocol Compliance (Opt-in Only)
+- **v1.0 is now opt-in**: Removed auto-detection from `supportedInterfaces`. Must pass `protocol_version="1.0"` to `BasicA2AClient` constructor.
+- **CamelCase wire format**: All v1.0 models use `by_alias=True` for serialization with proper camelCase aliases (`contextId`, `artifactId`, `messageId`, `supportedInterfaces`).
+- **Skill name in metadata**: `skill_name` now sent in `message.metadata` (not embedded in message text as JSON).
+- **contextId on Message**: v1.0 correctly places `contextId` on the Message object, not as top-level parameter.
+- **Deduplicated task state mapping**: Single `_map_task_state()` helper replaces 5 duplicate implementations across client methods.
+
+### Changed
+- **Client API**: `BasicA2AClient` now requires explicit `protocol_version="1.0"` for v1.0 behavior (default is "0.3").
+- **Message model**: Added `metadata` field for v1.0 extensions.
+- **Models**: Added `model_config = {"populate_by_name": True}` to all v1.0 models for camelCase alias support.
+
+### Tests
+- Updated v1.0 tests to reflect opt-in behavior and camelCase wire format.
+- All 38 tests passing (16 v1.0, 11 integration, 5 base, 6 server).
+
 ## [0.1.4] - 2026-11-16
 
 ### Fixed - Critical A2A Protocol Compliance

@@ -52,12 +52,19 @@ class PartWithKind(BaseModel):
 
 
 class Message(BaseModel):
-    """A message exchanged between agents."""
+    """A message exchanged between agents.
+
+    v1.0: metadata field for skill name and other extensions.
+    Uses camelCase aliases for wire format.
+    """
 
     role: Literal["user", "assistant", "system"]
     parts: list[Part]
-    message_id: str | None = None
-    context_id: str | None = None
+    message_id: str | None = Field(default=None, alias="messageId")
+    context_id: str | None = Field(default=None, alias="contextId")
+    metadata: dict[str, Any] | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class TaskInput(BaseModel):
@@ -74,34 +81,49 @@ class TaskOutput(BaseModel):
 
 
 class Task(BaseModel):
-    """A task represents a unit of work to be performed by an agent (v1.0)."""
+    """A task represents a unit of work to be performed by an agent (v1.0).
+
+    Uses camelCase aliases for wire format.
+    """
 
     id: str
-    context_id: str
+    context_id: str = Field(alias="contextId")
     status: "TaskStatus"
     history: list[Message] = Field(default_factory=list)
     artifacts: list["Artifact"] | None = None
     metadata: dict[str, Any] | None = Field(default_factory=dict)
     extensions: dict[str, Any] | None = None
 
+    model_config = {"populate_by_name": True}
+
 
 class TaskStatus(BaseModel):
-    """Task status in v1.0."""
+    """Task status in v1.0.
+
+    Uses camelCase aliases for wire format.
+    """
 
     state: Literal["submitted", "working", "input-required", "completed", "failed", "canceled"]
     message: Message | None = None
     timestamp: str | None = None
 
+    model_config = {"populate_by_name": True}
+
 
 class Artifact(BaseModel):
-    """Task artifact in v1.0."""
+    """Task artifact in v1.0.
 
-    artifact_id: str
+    Uses camelCase aliases for wire format.
+    """
+
+    artifact_id: str = Field(alias="artifactId")
     parts: list[Part]
     index: int | None = None
     append: bool | None = None
-    last_chunk: bool | None = None
+    last_chunk: bool | None = Field(default=None, alias="lastChunk")
     metadata: dict[str, Any] | None = None
+
+    model_config = {"populate_by_name": True}
 
 
 class Capability(BaseModel):

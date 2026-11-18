@@ -4,18 +4,24 @@ Basic A2A Client for connecting to A2A agents.
 Mirrors the BasicMCPClient pattern but adapted for the A2A protocol.
 Handles AgentCard discovery and task-based skill invocation.
 
-Supports both A2A protocol v0.3 and v1.0 via version detection and A2A-Version header.
+Supports both A2A protocol v0.3 and v1.0 via explicit protocol_version parameter.
 
 v1.0 Protocol Notes:
 - Method names: SendMessage, GetTask (PascalCase)
 - Part structure: discriminated union (TextPart, FilePart, DataPart) - NO 'kind' field
 - contextId: placed ON the Message object, not as top-level param
-- skill_name: embedded in message text as JSON {"skill": "name", "message": "..."}
+- skill_name: sent in message.metadata, not embedded in message text
 - A2A-Version: 1.0 header required for v1.0 servers
+
+v0.3 Protocol Notes:
+- Method names: message/send, tasks/get
+- Part structure: with 'kind' field (text, file, image)
+- contextId: placed ON the Message object
 """
 
 import json
 import logging
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -44,14 +50,13 @@ class BasicA2AClient:
     and provides methods to invoke skills through the A2A protocol.
 
     Supports both A2A v0.3 (message/send, tasks/get) and v1.0 (SendMessage, GetTask)
-    via automatic version detection and the A2A-Version header.
+    via explicit protocol_version parameter. Default is "0.3" for backward compatibility.
 
     Args:
         agent_card_url: The URL of the agent card (e.g., https://agent.example.com/.well-known/agent-card.json).
         timeout: The timeout for HTTP operations in seconds. Default is 30.
         headers: Optional headers to pass with requests.
-        protocol_version: Force a specific protocol version ("0.3" or "1.0"). Default: auto-detect.
-
+        protocol_version: Explicit protocol version ("0.3" or "1.0"). Default: "0.3".
     """
 
     def __init__(
@@ -59,7 +64,7 @@ class BasicA2AClient:
         agent_card_url: str,
         timeout: int = 30,
         headers: dict[str, str] | None = None,
-        protocol_version: str | None = None,
+        protocol_version: str = "0.3",
     ):
         self.agent_card_url = agent_card_url
         self.timeout = timeout
@@ -75,7 +80,7 @@ class BasicA2AClient:
         """Get headers for A2A requests, including A2A-Version header for v1.0."""
         headers = dict(self.base_headers)
         headers["Content-Type"] = "application/json"
-        if self._detected_version == "1.0":
+        if self.protocol_version == "1.0":
             headers["A2A-Version"] = "1.0"
         return headers
 
@@ -88,7 +93,11 @@ class BasicA2AClient:
         return self._http_client
 
     async def _discover_agent_card(self) -> AgentCard:
-        """Discover and parse the agent card from the given URL."""
+        """Discover and parse the agent card from the given URL.
+
+        Version detection: v1.0 is opt-in only via protocol_version="1.0" constructor parameter.
+        No auto-detection from supportedInterfaces - must be explicitly requested.
+        """
         if self._agent_card is not None:
             return self._agent_card
 
@@ -98,33 +107,25 @@ class BasicA2AClient:
 
         self._agent_card = AgentCard.model_validate(response.json())
 
-        # Detect protocol version
+        # Use explicit protocol_version if provided, otherwise default to v0.3
+        # v1.0 is opt-in - no auto-detection from supportedInterfaces
         if self._forced_protocol_version:
             self._detected_version = self._forced_protocol_version
         else:
-            # v1.0 wire format uses supportedInterfaces (not additionalInterfaces)
-            # additionalInterfaces is a2a-sdk 0.3.26 internal field name
-            # Only detect v1.0 if supported_interfaces is present
-            has_supported = getattr(self._agent_card, 'supported_interfaces', None)
-            if has_supported:
-                self._detected_version = "1.0"
-            else:
-                self._detected_version = "0.3"
-
-        logger.info(f"Detected A2A protocol version: {self._detected_version}")
+            self._detected_version = "0.3"
+        logger.info(f"Using A2A protocol version: {self._detected_version} (explicit)")
         return self._agent_card
 
     @property
     def protocol_version(self) -> str:
-        """Get the detected/forced protocol version (synchronous access)."""
-        # Note: this is a sync property. Call get_agent_card() first for reliable detection.
-        return self._detected_version or "0.3"
+        """Get the explicit/forced protocol version."""
+        return self._detected_version or self._forced_protocol_version or "0.3"
 
     async def detect_protocol_version(self) -> str:
         """Async method to ensure discovery and return protocol version."""
         if self._detected_version is None:
             await self._discover_agent_card()
-        return self._detected_version or "0.3"
+        return self.protocol_version
 
     @property
     def base_url(self) -> str:
@@ -209,13 +210,15 @@ class BasicA2AClient:
     def _build_v1_message(
         self, skill_name: str, message_text: str, context_id: str | None = None
     ) -> Message:
-        """Build a v1.0 Message with skill_name embedded in text and contextId on the Message."""
-        # v1.0: embed skill name in message text as JSON
-        message_payload = json.dumps({"skill": skill_name, "message": message_text})
-        parts = [TextPart(text=message_payload)]
-        msg = Message(role="user", parts=parts)
-        if context_id:
-            msg.context_id = context_id
+        """Build a v1.0 Message with skill_name in metadata and contextId on the Message."""
+        # v1.0: put skill name in message.metadata, not in text
+        msg = Message(
+            role="user",
+            parts=[TextPart(text=message_text)],
+            context_id=context_id,
+        )
+        if skill_name:
+            msg.metadata = {"skill": skill_name}
         return msg
 
     def _build_v1_parts(self, message_text: str) -> list[Part]:
@@ -225,6 +228,25 @@ class BasicA2AClient:
     def _build_v03_parts(self, message_text: str) -> list[dict]:
         """Build v0.3 parts (with 'kind' field for wire compatibility)."""
         return [{"kind": "text", "text": message_text}]
+
+    def _build_v03_message(self, message_text: str, context_id: str | None = None) -> dict:
+        """Build a v0.3 message with messageId and optional contextId."""
+        return {
+            "messageId": f"msg-{uuid.uuid4().hex[:8]}",
+            "role": "user",
+            "parts": self._build_v03_parts(message_text),
+            **({"contextId": context_id} if context_id else {}),
+        }
+
+    def _map_task_state(self, state: str) -> dict | None:
+        """Map task state to error dict if terminal error state."""
+        if state == "input-required":
+            return {"code": -32001, "message": "Task requires additional input"}
+        if state == "failed":
+            return {"code": -32002, "message": "Task failed"}
+        if state == "canceled":
+            return {"code": -32003, "message": "Task was canceled"}
+        return None
 
     async def call_skill(
         self,
@@ -257,11 +279,11 @@ class BasicA2AClient:
                 message_text = arguments.get("message", "")
                 context_id = arguments.get("context_id")
 
-            # Build v1.0 message with skill_name embedded
+            # Build v1.0 message with skill_name in metadata
             msg = self._build_v1_message(skill_name, message_text, context_id)
 
             params = {
-                "message": msg.model_dump(exclude_none=True)
+                "message": msg.model_dump(by_alias=True, exclude_none=True)
             }
 
             result = await self._send_v1_request("SendMessage", params)
@@ -270,33 +292,15 @@ class BasicA2AClient:
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
                 task = send_result.task
-                # Check task state
+                # Check task state using shared helper
                 task_state = task.status.state if task.status else "unknown"
-                if task_state == "input-required":
+                error_info = self._map_task_state(task_state)
+                if error_info:
                     return TaskResult(
                         task_id=task.id,
                         error={
-                            "code": -32001,
-                            "message": "Task requires additional input",
+                            **error_info,
                             "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "failed":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32002,
-                            "message": "Task failed",
-                            "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "canceled":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32003,
-                            "message": "Task was canceled",
-                            "data": {"state": task_state},
                         },
                     )
                 # Return ALL artifacts combined
@@ -322,9 +326,6 @@ class BasicA2AClient:
             # The message text should be the workflow input directly.
             # If arguments has a "message" key, use its value as the message text.
             # Otherwise, JSON-serialize the entire arguments dict.
-            import json
-            import uuid
-
             if arguments and "message" in arguments and isinstance(arguments["message"], str):
                 # Called from A2AToolSpec: message is the actual text to send
                 message_text = arguments["message"]
@@ -352,39 +353,18 @@ class BasicA2AClient:
             # v0.3 returns a full Task object - convert to TaskResult
             task_id = raw_result.get("id") or raw_result.get("task_id") or ""
 
-            # Check task state for v0.3
+            # Check task state for v0.3 using shared helper
             task_state = raw_result.get("status", {}).get("state", "unknown")
-            if task_state == "input-required":
+            error_info = self._map_task_state(task_state)
+            if error_info:
                 return TaskResult(
                     task_id=task_id,
                     error={
-                        "code": -32001,
-                        "message": "Task requires additional input",
+                        **error_info,
                         "data": {
                             "state": task_state,
                             "message": raw_result.get("status", {}).get("message"),
                         },
-                    },
-                )
-            if task_state == "failed":
-                return TaskResult(
-                    task_id=task_id,
-                    error={
-                        "code": -32002,
-                        "message": "Task failed",
-                        "data": {
-                            "state": task_state,
-                            "message": raw_result.get("status", {}).get("message"),
-                        },
-                    },
-                )
-            if task_state == "canceled":
-                return TaskResult(
-                    task_id=task_id,
-                    error={
-                        "code": -32003,
-                        "message": "Task was canceled",
-                        "data": {"state": task_state},
                     },
                 )
 
@@ -431,40 +411,22 @@ class BasicA2AClient:
                 context_id=context_id,
             )
             params = {
-                "message": msg.model_dump(exclude_none=True)
+                "message": msg.model_dump(by_alias=True, exclude_none=True)
             }
             result = await self._send_v1_request("SendMessage", params)
             raw_result = result.get("result", {})
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
                 task = send_result.task
-                # Check task state
+                # Check task state using shared helper
                 task_state = task.status.state if task.status else "unknown"
-                if task_state == "input-required":
+                error_info = self._map_task_state(task_state)
+                if error_info:
                     return TaskResult(
                         task_id=task.id,
                         error={
-                            "code": -32001,
-                            "message": "Task requires additional input",
+                            **error_info,
                             "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "failed":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32002,
-                            "message": "Task failed",
-                            "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "canceled":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32003,
-                            "message": "Task was canceled",
-                            "data": {"state": task_state},
                         },
                     )
                 # Wrap in TaskOutput for consistency with call_skill - return ALL artifacts
@@ -486,13 +448,8 @@ class BasicA2AClient:
             return TaskResult(task_id="")
         else:
             # v0.3: Use message/send
-            import uuid
             params = {
-                "message": {
-                    "messageId": f"msg-{uuid.uuid4().hex[:8]}",
-                    "role": "user",
-                    "parts": self._build_v03_parts(message),
-                }
+                "message": self._build_v03_message(message, context_id)
             }
             # v0.3: contextId is NOT a top-level param; it goes inside message if needed
 
@@ -501,39 +458,18 @@ class BasicA2AClient:
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
 
-            # Check task state for v0.3
+            # Check task state for v0.3 using shared helper
             task_state = raw_result.get("status", {}).get("state", "unknown")
-            if task_state == "input-required":
+            error_info = self._map_task_state(task_state)
+            if error_info:
                 return TaskResult(
                     task_id=raw_result.get("task_id") or raw_result.get("id") or "",
                     error={
-                        "code": -32001,
-                        "message": "Task requires additional input",
+                        **error_info,
                         "data": {
                             "state": task_state,
                             "message": raw_result.get("status", {}).get("message"),
                         },
-                    },
-                )
-            if task_state == "failed":
-                return TaskResult(
-                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
-                    error={
-                        "code": -32002,
-                        "message": "Task failed",
-                        "data": {
-                            "state": task_state,
-                            "message": raw_result.get("status", {}).get("message"),
-                        },
-                    },
-                )
-            if task_state == "canceled":
-                return TaskResult(
-                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
-                    error={
-                        "code": -32003,
-                        "message": "Task was canceled",
-                        "data": {"state": task_state},
                     },
                 )
 
@@ -599,33 +535,15 @@ class BasicA2AClient:
             raw_result = result.get("result", {})
             try:
                 task = Task.model_validate(raw_result)
-                # v1.0: Check task state for input-required, failed, canceled
+                # v1.0: Check task state for input-required, failed, canceled using shared helper
                 task_state = task.status.state if task.status else "unknown"
-                if task_state == "input-required":
+                error_info = self._map_task_state(task_state)
+                if error_info:
                     return TaskResult(
                         task_id=task.id,
                         error={
-                            "code": -32001,
-                            "message": "Task requires additional input",
+                            **error_info,
                             "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "failed":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32002,
-                            "message": "Task failed",
-                            "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                if task_state == "canceled":
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            "code": -32003,
-                            "message": "Task was canceled",
-                            "data": {"state": task_state},
                         },
                     )
                 # Return ALL artifacts combined

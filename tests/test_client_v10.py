@@ -16,7 +16,7 @@ from llama_index.tools.a2a_tools.models import (
 
 @pytest.mark.asyncio
 async def test_version_detection_v10_supported_interfaces():
-    """Test that v1.0 is detected ONLY from supported_interfaces (wire format)."""
+    """Test that v1.0 is NOT auto-detected - must be opt-in via protocol_version parameter."""
     mock_card = AgentCard(
         name="TestAgent",
         url="http://example.com",
@@ -29,9 +29,18 @@ async def test_version_detection_v10_supported_interfaces():
     mock_response.json.return_value = mock_card.model_dump(by_alias=True)
 
     with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_response)):
+        # No protocol_version specified - should default to v0.3
         client = BasicA2AClient("http://example.com/.well-known/agent-card.json")
         await client.get_agent_card()
-        assert client.protocol_version == "1.0"
+        assert client.protocol_version == "0.3"
+
+        # With explicit protocol_version="1.0" - should use v1.0
+        client_v10 = BasicA2AClient(
+            "http://example.com/.well-known/agent-card.json",
+            protocol_version="1.0",
+        )
+        await client_v10.get_agent_card()
+        assert client_v10.protocol_version == "1.0"
 
 
 @pytest.mark.asyncio
@@ -130,13 +139,12 @@ async def test_call_skill_v10_method_name():
             params = request_payload["params"]
             assert "contextId" not in params  # Not at top level
             assert "message" in params
-            assert params["message"]["context_id"] == "ctx-1"
+            assert params["message"]["contextId"] == "ctx-1"
 
-            # Verify skill_name is embedded in message text
-            msg_text = params["message"]["parts"][0]["text"]
-            msg_data = json.loads(msg_text)
-            assert msg_data["skill"] == "my-skill"
-            assert msg_data["message"] == "hello"
+            # Verify skill_name is in message metadata (not embedded in text)
+            assert params["message"]["metadata"]["skill"] == "my-skill"
+            # Verify message text is just the user message
+            assert params["message"]["parts"][0]["text"] == "hello"
 
             assert result.task_id == "task-123"
 
@@ -186,7 +194,7 @@ async def test_send_message_v10_context_id_on_message():
 
             params = request_payload["params"]
             assert "contextId" not in params  # Not at top level
-            assert params["message"]["context_id"] == "ctx-789"
+            assert params["message"]["contextId"] == "ctx-789"
 
             # Result should have task_id from message
             assert result.task_id == ""
@@ -537,12 +545,11 @@ async def test_v10_fake_server_call_skill():
                 # Verify contextId is on Message, not top-level
                 assert "contextId" not in body["params"]
                 assert "message" in body["params"]
-                assert body["params"]["message"]["context_id"] == "ctx-test"
-                # Verify skill_name embedded in message text
-                msg_text = body["params"]["message"]["parts"][0]["text"]
-                msg_data = json.loads(msg_text)
-                assert msg_data["skill"] == "fake-skill"
-                assert msg_data["message"] == "test message"
+                assert body["params"]["message"]["contextId"] == "ctx-test"
+                # Verify skill_name in message metadata (not embedded in text)
+                assert body["params"]["message"]["metadata"]["skill"] == "fake-skill"
+                # Verify message text is just the user message
+                assert body["params"]["message"]["parts"][0]["text"] == "test message"
                 # Verify no 'kind' field in parts
                 assert "kind" not in body["params"]["message"]["parts"][0]
 
@@ -611,7 +618,7 @@ async def test_v10_fake_server_send_message():
                 assert request.headers.get("A2A-Version") == "1.0"
                 assert body["method"] == "SendMessage"
                 assert "contextId" not in body["params"]
-                assert body["params"]["message"]["context_id"] == "ctx-send"
+                assert body["params"]["message"]["contextId"] == "ctx-send"
                 assert "kind" not in body["params"]["message"]["parts"][0]
 
                 # Return a Message response (not a Task)
