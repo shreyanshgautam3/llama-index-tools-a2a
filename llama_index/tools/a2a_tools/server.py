@@ -5,7 +5,8 @@ Mirrors the `workflow_as_mcp` pattern from llama-index-tools-mcp.
 Uses the a2a-sdk server components (AgentExecutor, DefaultRequestHandler, etc.)
 to create a FastAPI app that conforms to the A2A protocol.
 
-Supports both A2A protocol v0.3 and v1.0 via method name handling.
+Supports A2A protocol v0.3 method names (message/send, tasks/get).
+v1.0 format is NOT SUPPORTED by a2a-sdk 0.3.26.
 """
 
 from typing import Any
@@ -25,16 +26,30 @@ from a2a.types import (
     AgentProvider as A2AAgentProvider,
 )
 from a2a.types import (
-    AgentSkill,
-    Artifact,
-    Message,
+    AgentSkill as A2AAgentSkill,
+)
+from a2a.types import (
+    Artifact as A2AArtifact,
+)
+from a2a.types import (
+    Message as A2AMessage,
+)
+from a2a.types import (
+    Part as A2APart,
+)
+from a2a.types import (
     Role,
-    TaskArtifactUpdateEvent,
     TaskState,
     TaskStatus,
-    TaskStatusUpdateEvent,
     TextPart,
 )
+from a2a.types import (
+    TaskArtifactUpdateEvent as A2ATaskArtifactUpdateEvent,
+)
+from a2a.types import (
+    TaskStatusUpdateEvent as A2ATaskStatusUpdateEvent,
+)
+from fastapi.routing import APIRoute
 from llama_index.core.workflow import StartEvent, Workflow
 from pydantic import BaseModel
 
@@ -78,11 +93,14 @@ class WorkflowAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Execute the workflow, streaming intermediate and final events."""
         user_input = context.get_user_input()
+        task_id_str = context.task_id or "unknown"
+        context_id_str = context.context_id or ""
+
         if not user_input:
             await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    task_id=context.task_id,
-                    context_id=context.context_id,
+                A2ATaskStatusUpdateEvent(
+                    task_id=task_id_str,
+                    context_id=context_id_str,
                     status=TaskStatus(state=TaskState.failed),
                     final=True,
                 )
@@ -109,11 +127,11 @@ class WorkflowAgentExecutor(AgentExecutor):
             else:
                 input_data = {"input": user_input}
 
-            # Validate and create StartEvent
+            # Validate and create StartEvent - model_validate creates the correct subclass instance
             start_event = self.start_event_model.model_validate(input_data)
 
             # Run the workflow (Workflow.run() returns a coroutine — await it directly)
-            result = await self.workflow.run(start_event=start_event)
+            result = await self.workflow.run(start_event=start_event)  # type: ignore[arg-type]
 
             # Send artifact with result
             if result is not None:
@@ -123,12 +141,12 @@ class WorkflowAgentExecutor(AgentExecutor):
                     result_text = str(result)
 
                 await event_queue.enqueue_event(
-                    TaskArtifactUpdateEvent(
-                        task_id=context.task_id,
-                        context_id=context.context_id,
-                        artifact=Artifact(
-                            artifact_id=f"{context.task_id}-artifact",
-                            parts=[TextPart(text=result_text)],
+                    A2ATaskArtifactUpdateEvent(
+                        task_id=task_id_str,
+                        context_id=context_id_str,
+                        artifact=A2AArtifact(
+                            artifact_id=f"{task_id_str}-artifact",
+                            parts=[A2APart(root=TextPart(text=result_text))],
                         ),
                         last_chunk=True,
                     )
@@ -136,9 +154,9 @@ class WorkflowAgentExecutor(AgentExecutor):
 
             # Final completion status
             await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    task_id=context.task_id,
-                    context_id=context.context_id,
+                A2ATaskStatusUpdateEvent(
+                    task_id=task_id_str,
+                    context_id=context_id_str,
                     status=TaskStatus(state=TaskState.completed),
                     final=True,
                 )
@@ -146,15 +164,15 @@ class WorkflowAgentExecutor(AgentExecutor):
 
         except Exception as e:
             await event_queue.enqueue_event(
-                TaskStatusUpdateEvent(
-                    task_id=context.task_id,
-                    context_id=context.context_id,
+                A2ATaskStatusUpdateEvent(
+                    task_id=task_id_str,
+                    context_id=context_id_str,
                     status=TaskStatus(
                         state=TaskState.failed,
-                        message=Message(
-                            messageId=f"{context.task_id}-error",
+                        message=A2AMessage(
+                            message_id=f"{context.task_id}-error" if context.task_id else "error",
                             role=Role.agent,
-                            parts=[TextPart(text=f"Workflow error: {str(e)}")],
+                            parts=[A2APart(root=TextPart(text=f"Workflow error: {str(e)}"))],
                         ),
                     ),
                     final=True,
@@ -163,10 +181,12 @@ class WorkflowAgentExecutor(AgentExecutor):
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel the workflow execution."""
+        task_id_str = context.task_id or "unknown"
+        context_id_str = context.context_id or ""
         await event_queue.enqueue_event(
-            TaskStatusUpdateEvent(
-                task_id=context.task_id,
-                context_id=context.context_id,
+            A2ATaskStatusUpdateEvent(
+                task_id=task_id_str,
+                context_id=context_id_str,
                 status=TaskStatus(state=TaskState.canceled),
                 final=True,
             )
@@ -200,14 +220,8 @@ def create_agent_card(
     name = workflow_name or workflow.__class__.__name__
     description = workflow_description or workflow.__doc__ or "LlamaIndex Workflow Agent"
 
-    start_event_cls = start_event_model or workflow._start_event_class
-
-    if start_event_cls != StartEvent:
-        start_event_cls.model_json_schema()
-    else:
-        pass
-
-    skill = AgentSkill(
+    # Create the skill with required fields
+    skill = A2AAgentSkill(
         id=name.lower().replace(" ", "-"),
         name=name,
         description=description,
@@ -234,18 +248,17 @@ def create_agent_card(
                 id=skill.id,
                 name=skill.name,
                 description=skill.description,
-                tags=skill.tags,
-                examples=skill.examples,
+                tags=skill.tags or ["workflow", "llama-index"],
+                examples=skill.examples or [],
                 input_modes=skill.input_modes,
                 output_modes=skill.output_modes,
-                # input_schema and output_schema are not standard A2A fields; omit them
             )
         ],
         capabilities=capabilities,
         provider=provider,
         default_input_modes=["text/plain", "application/json"],
         default_output_modes=["text/plain", "application/json"],
-        preferred_transport="JSONRPC",
+        preferredTransport="JSONRPC",
     )
 
     return agent_card
@@ -254,15 +267,15 @@ def create_agent_card(
 def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> A2AAgentCard:
     """Convert our local AgentCard to a2a-sdk AgentCard for A2AFastAPIApplication."""
     # Convert skills
-    a2a_skills = []
+    skill_list: list[A2AAgentSkill] = []
     for s in local_card.skills:
-        a2a_skills.append(
-            AgentSkill(
+        skill_list.append(
+            A2AAgentSkill(
                 id=s.id,
                 name=s.name,
-                description=s.description,
+                description=s.description or "",
                 tags=s.tags or ["workflow", "llama-index"],
-                examples=[],
+                examples=s.examples if s.examples else [],
                 input_modes=s.input_modes or ["text/plain", "application/json"],
                 output_modes=s.output_modes or ["text/plain", "application/json"],
             )
@@ -271,35 +284,34 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
     # Convert capabilities
     a2a_capabilities = A2AAgentCapabilities(
         streaming=local_card.capabilities.streaming if local_card.capabilities else False,
-        push_notifications=(
-            local_card.capabilities.push_notifications if local_card.capabilities else False
-        ),
+        push_notifications=local_card.capabilities.push_notifications
+        if local_card.capabilities
+        else False,
     )
 
     # Convert provider
-    a2a_provider = A2AAgentProvider(
-        organization=local_card.provider.organization if local_card.provider else "LlamaIndex",
-        url=local_card.provider.url
-        if local_card.provider
-        else "https://github.com/run-llama/llama_index",
+    a2a_provider: A2AAgentProvider | None = None
+    if local_card.provider:
+        a2a_provider = A2AAgentProvider(
+            organization=local_card.provider.organization,
+            url=local_card.provider.url,
+        )
+
+    # Build a2a-sdk AgentCard - uses positional args: name, description, version, url, skills
+    a2a_card = A2AAgentCard(
+        name=local_card.name,
+        description=local_card.description or "",
+        version=local_card.version or "1.0.0",
+        url=local_card.url or "http://localhost:8000",
+        skills=skill_list,
+        capabilities=a2a_capabilities,
+        default_input_modes=local_card.default_input_modes or ["text/plain", "application/json"],
+        default_output_modes=local_card.default_output_modes or ["text/plain", "application/json"],
+        preferred_transport=local_card.preferred_transport or "JSONRPC",
+        provider=a2a_provider,
     )
 
-    # Build a2a-sdk AgentCard (v0.3 format only)
-    a2a_card_data = {
-        "name": local_card.name,
-        "description": local_card.description,
-        "version": local_card.version,
-        "url": local_card.url,
-        "skills": a2a_skills,
-        "capabilities": a2a_capabilities,
-        "provider": a2a_provider,
-        "default_input_modes": local_card.default_input_modes or ["text/plain", "application/json"],
-        "default_output_modes": local_card.default_output_modes
-        or ["text/plain", "application/json"],
-        "preferred_transport": local_card.preferred_transport or "JSONRPC",
-    }
-
-    return A2AAgentCard(**a2a_card_data)
+    return a2a_card
 
 
 def workflow_as_a2a(
@@ -391,19 +403,23 @@ def workflow_as_a2a(
     app.state.request_handler = request_handler
 
     # Override agent-card route to serve local card (with supportedInterfaces for v1.0)
-    async def _serve_local_agent_card():
+    async def _serve_local_agent_card() -> dict[str, Any]:
         # Serialize local card using by_alias=True for camelCase wire format
         return local_agent_card.model_dump(by_alias=True, exclude_none=True)
 
     # Find and replace the agent-card route
     for i, route in enumerate(app.routes):
         if hasattr(route, "path") and route.path == "/.well-known/agent-card.json":
-            app.routes[i] = type(route)(
+            # Safely get methods and name attributes
+            methods = getattr(route, "methods", None)
+            name = getattr(route, "name", None)
+            new_route = APIRoute(
                 path=route.path,
                 endpoint=_serve_local_agent_card,
-                methods=route.methods,
-                name=route.name,
+                methods=methods,
+                name=name,
             )
+            app.routes[i] = new_route
             break
 
     return app

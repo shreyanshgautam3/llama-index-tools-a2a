@@ -200,6 +200,8 @@ class Skill(Capability):
     name: str
     input_modes: list[str] | None = None
     output_modes: list[str] | None = None
+    examples: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     # input_schema and output_schema are not standard A2A fields; removed per A2A spec
 
 
@@ -218,7 +220,7 @@ class AgentProvider(BaseModel):
 
 
 class AgentInterface(BaseModel):
-    """Agent interface declaration for v1.0 additionalInterfaces.
+    """Agent interface declaration for v1.0 supportedInterfaces.
 
     v1.0 uses protocolBinding + protocolVersion (not transport).
     """
@@ -226,6 +228,18 @@ class AgentInterface(BaseModel):
     url: str
     protocol_binding: str = Field(alias="protocolBinding")
     protocol_version: str = Field(alias="protocolVersion")
+
+    model_config = {"populate_by_name": True}
+
+
+class AgentInterfaceV03(BaseModel):
+    """Agent interface declaration for v0.3 additionalInterfaces.
+
+    v0.3 uses url + transport (not protocolBinding/protocolVersion).
+    """
+
+    url: str
+    transport: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -257,23 +271,63 @@ class AgentCard(BaseModel):
     preferred_transport: str | None = Field(default=None, alias="preferredTransport")
     protocol_version: str | None = None
     # v1.0 fields - a2a-sdk uses additionalInterfaces, wire format also uses additionalInterfaces
-    additional_interfaces: list[AgentInterface] | None = Field(
+    additional_interfaces: list[AgentInterfaceV03] | None = Field(
         default=None, alias="additionalInterfaces"
     )
-    # Alias for backward compatibility - some docs refer to this as supportedInterfaces
+    # v1.0 supportedInterfaces - uses protocolBinding + protocolVersion
     supported_interfaces: list[AgentInterface] | None = Field(
         default=None, alias="supportedInterfaces"
     )
 
     @property
     def primary_url(self) -> str:
-        """Get the primary URL for the agent (v1.0: first additionalInterface/
-        supportedInterface, v0.3: url field)."""
-        # Check both field names for v1.0 compatibility
-        interfaces = self.additional_interfaces or self.supported_interfaces
-        if interfaces:
-            return interfaces[0].url
-        return self.url or ""
+        """Get the primary URL for the agent.
+
+        Mode-dependent logic:
+        - v0.3: use card.url; fall back to first additionalInterfaces entry
+          only if url is empty/None.
+        - v1.0: use first supportedInterfaces entry whose protocolBinding is
+          JSONRPC; return "" if none found.
+
+        Note: AgentCard model itself does not know the protocol version.
+        The caller (client) should use this in combination with protocol_version
+        to get the correct URL. For standalone use, this property returns the
+        v0.3-style url or the first additionalInterfaces URL.
+        """
+        # v0.3 style: url field takes priority
+        if self.url:
+            return self.url
+        # Fall back to first additionalInterfaces entry
+        if self.additional_interfaces:
+            return self.additional_interfaces[0].url
+        # v1.0: first supportedInterfaces with JSONRPC binding
+        if self.supported_interfaces:
+            for iface in self.supported_interfaces:
+                if iface.protocol_binding.upper() == "JSONRPC":
+                    return iface.url
+        return ""
+
+    def primary_url_for_version(self, version: str) -> str:
+        """Get the primary URL appropriate for the given protocol version.
+
+        Mode-dependent URL selection:
+        - version "0.3": use card.url; fall back to first additionalInterfaces
+          entry only if url is empty/None.
+        - version "1.0": use first supportedInterfaces entry whose
+          protocolBinding is JSONRPC; return "" if none found.
+        """
+        if version == "0.3":
+            if self.url:
+                return self.url
+            if self.additional_interfaces:
+                return self.additional_interfaces[0].url
+            return ""
+        # v1.0
+        if self.supported_interfaces:
+            for iface in self.supported_interfaces:
+                if iface.protocol_binding.upper() == "JSONRPC":
+                    return iface.url
+        return ""
 
 
 class TaskResult(BaseModel):

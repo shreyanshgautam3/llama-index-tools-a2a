@@ -27,6 +27,7 @@ jobs:
           pip list | grep -E "a2a|llama|pydantic|httpx|pytest|anyio|asyncio"
       - name: Lint
         run: ruff check .
+      - name: Check formatting
+        run: ruff format --check .
       - name: Test
-        run: |
-          pytest -v --tb=short --asyncio-mode=strict
+        run: pytest -v --tb=short --asyncio-mode=strict

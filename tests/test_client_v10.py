@@ -10,6 +10,7 @@ from llama_index.tools.a2a_tools.client import BasicA2AClient
 from llama_index.tools.a2a_tools.models import (
     AgentCard,
     AgentInterface,
+    AgentInterfaceV03,
     Skill,
 )
 
@@ -77,12 +78,11 @@ async def test_version_detection_not_fooled_by_additional_interfaces():
         url="http://example.com",
         skills=[Skill(name="skill1", description="A skill")],
         # additional_interfaces is a2a-sdk 0.3.26 internal field
-        # It should NOT cause v1.0 detection
+        # It should NOT cause v1.0 detection; typed as AgentInterfaceV03 (url+transport)
         additional_interfaces=[
-            AgentInterface(
+            AgentInterfaceV03(
                 url="http://example.com",
-                protocol_binding="JSONRPC",
-                protocol_version="1.0",
+                transport="JSONRPC",
             )
         ],
     )

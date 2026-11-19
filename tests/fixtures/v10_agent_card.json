@@ -1,19 +1,26 @@
 {
   "jsonrpc": "2.0",
+  "id": "agent-card-fetch",
   "result": {
     "name": "Hello World Agent",
     "description": "Just a hello world agent",
+    "supportedInterfaces": [
+      {
+        "url": "http://127.0.0.1:9999",
+        "protocolBinding": "JSONRPC",
+        "protocolVersion": "1.0"
+      }
+    ],
     "version": "0.0.1",
+    "capabilities": {
+      "streaming": true
+    },
     "defaultInputModes": [
       "text/plain"
     ],
     "defaultOutputModes": [
       "text/plain"
     ],
-    "capabilities": {
-      "streaming": true,
-      "pushNotifications": false
-    },
     "skills": [
       {
         "id": "echo_bot",
@@ -34,14 +41,6 @@
           "text/plain"
         ]
       }
-    ],
-    "additionalInterfaces": [
-      {
-        "url": "http://127.0.0.1:9999",
-        "protocolBinding": "JSONRPC",
-        "protocolVersion": "1.0"
-      }
     ]
-  },
-  "id": 7
+  }
 }

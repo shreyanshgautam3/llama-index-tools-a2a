@@ -140,7 +140,7 @@ Based on `a2a-sdk==0.3.26` with v1.0 wire protocol additions for the outbound cl
 - **Streaming**: Inbound server declares `streaming: false` (correct) — actual SSE/event streaming is not implemented in `WorkflowAgentExecutor`.
 - **Task polling**: `call_skill` uses `SendMessage` (v1.0) or `message/send` (v0.3) — fire-and-forget; no automatic polling for long-running tasks. Use `get_task()` to retrieve results.
 - **Error handling**: Error responses from agents are wrapped in `TaskResult.error` but not systematically classified.
-- **Testing**: 52 tests — integration tests use `ASGITransport` against local v0.3 server; v1.0 client paths are tested against real wire format fixtures and mocked responses.
+- **Testing**: 61 tests — integration tests use `ASGITransport` against local v0.3 server; v1.0 client paths are tested against real wire format fixtures captured from a running v1.0 server.
 - **Multi-turn**: `contextId` is passed through but conversation state management is caller responsibility (use `A2AToolSpec.context_id` property).
 - **Skill schemas**: A2A v1.0 skills do not include JSON input schemas; tools accept natural language `message` parameter (pass JSON in text for structured input).
 - **Underlying SDK**: Uses `a2a-sdk==0.3.26` — inbound server handles only v0.3 method names regardless of AgentCard format version.
@@ -162,7 +162,7 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
-- **v0.1.5** (2026-11-19): v1.0 protocol compliance — opt-in v1.0 via `protocol_version="1.0"` (no auto-detection), camelCase wire format via `by_alias=True`, skill_name in `message.metadata` (not embedded in text), contextId on Message object, deduplicated task state mapping with `_flatten_artifacts()`, v0.3 `contextId` handling in `call_skill`, 52 tests passing ✅
+- **v0.1.5** (2026-11-19): v1.0 protocol compliance — opt-in v1.0 via `protocol_version="1.0"` (no auto-detection), camelCase wire format via `by_alias=True`, skill_name in `message.metadata` (not embedded in text), contextId on Message object, deduplicated task state mapping with `_flatten_artifacts()`, v0.3 `contextId` handling in `call_skill`, 61 tests passing (verified against PyPI 0.1.5, real v1.0 fixtures from a2a-samples helloworld) ✅
 - **v0.1.4** (2026-11-16): Fixed A2A protocol compliance — v1.0 client method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), removed v1.0 server support (a2a-sdk 0.3.26 limitation), 38 tests passing ✅
 - **v0.1.3** (2026-11-15): A2A v1.0 dual-version support (experimental), multi-turn contextId, honest feature naming, FunctionAgent examples ✅
 - **v0.1.2** (2026-11-14): CI stability — strict asyncio mode, debug output, protocol version docs ✅

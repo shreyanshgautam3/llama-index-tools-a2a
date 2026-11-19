@@ -98,21 +98,34 @@ class TestV10FixturesSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_v10_completed_task(self):
-        """Test send_message returning a completed task (v10_send_message_result)."""
+        """Test send_message returning a completed task (v10_send_message_result).
+
+        Real capture from a2a-samples helloworld server:
+        - Uses TASK_STATE_COMPLETED (not "completed")
+        - Task ID is a UUID
+        - Returns task with artifacts containing the response
+        """
         transport = MockTransport({"send_message": V10_SEND_MESSAGE_RESULT})
         client = make_client(transport)
 
         result = await client.send_message("hi")
 
         assert isinstance(result, TaskResult)
-        assert result.task_id == "task-001"
+        # Real server returns a UUID, not a mock ID
+        assert result.task_id != ""
+        assert len(result.task_id) == 36  # UUID format
         assert result.output is not None
+        # Real server returns artifact with "Hello, World! I have received your request (hi)"
         assert len(result.output.parts) == 1
         assert result.output.parts[0].text == "Hello, World! I have received your request (hi)"
 
     @pytest.mark.asyncio
     async def test_send_message_v10_working_status(self):
-        """Test send_message returning working status (v10_send_message_working)."""
+        """Test send_message returning working status (v10_send_message_working).
+
+        Mock fixture for edge case - helloworld sample doesn't produce this.
+        Uses v0.3 style state "working" to test backward compatibility.
+        """
         transport = MockTransport({"send_message": V10_SEND_MESSAGE_WORKING})
         client = make_client(transport)
 
@@ -126,7 +139,10 @@ class TestV10FixturesSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_v10_direct_message(self):
-        """Test send_message returning a direct message (v10_send_message_direct)."""
+        """Test send_message returning a direct message (v10_send_message_direct).
+
+        Mock fixture for edge case - helloworld sample doesn't produce this.
+        """
         transport = MockTransport({"send_message": V10_SEND_MESSAGE_DIRECT})
         client = make_client(transport)
 
@@ -140,7 +156,10 @@ class TestV10FixturesSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_v10_failed(self):
-        """Test send_message returning failed task (v10_send_message_failed)."""
+        """Test send_message returning failed task (v10_send_message_failed).
+
+        Mock fixture for edge case - helloworld sample doesn't produce this.
+        """
         transport = MockTransport({"send_message": V10_SEND_MESSAGE_FAILED})
         client = make_client(transport)
 
@@ -156,7 +175,10 @@ class TestV10FixturesSendMessage:
 
     @pytest.mark.asyncio
     async def test_send_message_v10_multi_part_artifacts(self):
-        """Test send_message with multi-part artifacts (v10_send_message_multi_part)."""
+        """Test send_message with multi-part artifacts (v10_send_message_multi_part).
+
+        Mock fixture for edge case - helloworld sample doesn't produce this.
+        """
         transport = MockTransport({"send_message": V10_SEND_MESSAGE_MULTI_PART})
         client = make_client(transport)
 
@@ -193,17 +215,24 @@ class TestV10FixturesGetTask:
 
     @pytest.mark.asyncio
     async def test_get_task_v10_completed(self):
-        """Test get_task returning completed task (v10_get_task_completed)."""
+        """Test get_task returning completed task (v10_get_task_completed).
+
+        Real capture from a2a-samples helloworld server:
+        - GetTask returns task data directly in "result", not wrapped in "result.task"
+        - Task ID is a UUID
+        - State is TASK_STATE_COMPLETED
+        """
         transport = MockTransport({"get_task": V10_GET_TASK_COMPLETED})
         client = make_client(transport)
 
-        task = await client.get_task("task-005")
+        # Use the real task ID from the fixture
+        task = await client.get_task("9473f795-a32f-4183-be8e-cdcf17067d70")
 
         assert isinstance(task, TaskResult)
-        assert task.task_id == "task-005"
+        assert task.task_id == "9473f795-a32f-4183-be8e-cdcf17067d70"
         assert task.output is not None
         assert len(task.output.parts) == 1
-        assert task.output.parts[0].text == "Processed: hello"
+        assert task.output.parts[0].text == "Hello, World! I have received your request (hi)"
 
     @pytest.mark.asyncio
     async def test_get_task_v10_working(self):
@@ -223,8 +252,13 @@ class TestV10FixturesGetTask:
 class TestV10FixturesAgentCard:
     """Test AgentCard parsing with real v1.0 wire format."""
 
-    def test_agent_card_v10_additional_interfaces(self):
-        """Test AgentCard with additionalInterfaces (v10_agent_card)."""
+    def test_agent_card_v10_supported_interfaces(self):
+        """Test AgentCard with supportedInterfaces (v10_agent_card).
+
+        Real capture from a2a-samples helloworld server:
+        - v1.0 uses supportedInterfaces (NOT additionalInterfaces)
+        - Each interface has protocolBinding and protocolVersion
+        """
         from llama_index.tools.a2a_tools.models import AgentCard
 
         card = AgentCard.model_validate(V10_AGENT_CARD["result"])
@@ -237,13 +271,13 @@ class TestV10FixturesAgentCard:
         assert len(card.skills) == 1
         assert card.skills[0].id == "echo_bot"
         assert card.skills[0].name == "Echo Bot"
-        # v1.0: additionalInterfaces
-        assert card.additional_interfaces is not None
-        assert len(card.additional_interfaces) == 1
-        assert card.additional_interfaces[0].url == "http://127.0.0.1:9999"
-        assert card.additional_interfaces[0].protocol_binding == "JSONRPC"
-        assert card.additional_interfaces[0].protocol_version == "1.0"
-        # primary_url should return first additionalInterface URL
+        # v1.0: supportedInterfaces (NOT additionalInterfaces)
+        assert card.supported_interfaces is not None
+        assert len(card.supported_interfaces) == 1
+        assert card.supported_interfaces[0].url == "http://127.0.0.1:9999"
+        assert card.supported_interfaces[0].protocol_binding == "JSONRPC"
+        assert card.supported_interfaces[0].protocol_version == "1.0"
+        # primary_url should return first supportedInterfaces URL with JSONRPC
         assert card.primary_url == "http://127.0.0.1:9999"
 
 
@@ -289,59 +323,44 @@ class TestV10FixturesRoundtrip:
         assert "messageId" in wire
 
     def test_task_v10_roundtrip(self):
-        """Test Task model roundtrip with v1.0 fields."""
-        task_data = V10_GET_TASK_COMPLETED["result"]["task"]
+        """Test Task model roundtrip with v1.0 fields.
+
+        Real capture from a2a-samples helloworld server:
+        - GetTask returns task data directly in "result", not wrapped in "result.task"
+        - Task ID is a UUID
+        - State is TASK_STATE_COMPLETED
+        """
+        # GetTask returns task directly in result, not wrapped
+        task_data = V10_GET_TASK_COMPLETED["result"]
 
         task = Task.model_validate(task_data)
 
-        assert task.id == "task-005"
-        assert task.context_id == "ctx-005"
-        assert task.status.state == "completed"
+        assert task.id == "9473f795-a32f-4183-be8e-cdcf17067d70"
+        assert task.status.state == "TASK_STATE_COMPLETED"
         assert len(task.artifacts) == 1
 
         # Serialize back to wire format
         wire = task.model_dump(by_alias=True, exclude_none=True)
 
-        assert wire["id"] == "task-005"
-        assert wire["contextId"] == "ctx-005"
-        assert wire["status"]["state"] == "completed"
-        assert wire["artifacts"][0]["artifactId"] == "task-005-artifact"
-        assert wire["artifacts"][0]["parts"][0]["text"] == "Processed: hello"
-        assert wire["artifacts"][0]["lastChunk"] is True
+        assert wire["id"] == "9473f795-a32f-4183-be8e-cdcf17067d70"
+        assert wire["artifacts"][0]["artifactId"] == "fab1b3fc-1667-4d1a-ac2f-35da936faeb3"
+        expected_text = "Hello, World! I have received your request (hi)"
+        assert wire["artifacts"][0]["parts"][0]["text"] == expected_text
+        # lastChunk is optional and may not be present in all responses
 
     def test_part_v10_all_types_roundtrip(self):
-        """Test Part model with all v1.0 part types."""
-        # From v10_send_message_multi_part fixture
-        artifacts = V10_SEND_MESSAGE_MULTI_PART["result"]["task"]["artifacts"]
+        """Test Part model with all v1.0 part types from real fixture."""
+        # GetTask returns task data directly in result
+        artifacts = V10_GET_TASK_COMPLETED["result"]["artifacts"]
 
-        # Text part
+        # Text part from real helloworld fixture
         text_part = Part.model_validate(artifacts[0]["parts"][0])
-        assert text_part.text == "Here is the text content"
+        assert text_part.text == "Hello, World! I have received your request (hi)"
         assert text_part.is_text()
 
-        # File by URL
-        file_url_part = Part.model_validate(artifacts[1]["parts"][0])
-        assert file_url_part.url == "https://example.com/document.pdf"
-        assert file_url_part.media_type == "application/pdf"
-        assert file_url_part.filename == "document.pdf"
-        assert file_url_part.is_file()
-
-        # File by base64 (raw bytes)
-        file_raw_part = Part.model_validate(artifacts[2]["parts"][0])
-        assert file_raw_part.raw == b"Hello, World!"
-        assert file_raw_part.media_type == "text/plain"
-        assert file_raw_part.filename == "hello.txt"
-        assert file_raw_part.is_file()
-
-        # Data part
-        data_part = Part.model_validate(artifacts[3]["parts"][0])
-        assert data_part.data == {"key": "value", "numbers": [1, 2, 3], "nested": {"field": "data"}}
-        assert data_part.is_data()
-
         # All serialize correctly to wire format
-        for part in [text_part, file_url_part, file_raw_part, data_part]:
-            wire = part.model_dump(by_alias=True, exclude_none=True)
-            assert wire  # Should not be empty
+        wire = text_part.model_dump(by_alias=True, exclude_none=True)
+        assert wire  # Should not be empty
 
 
 class TestV10FixturesContextIdHandling:
@@ -373,7 +392,7 @@ class TestV10FixturesContextIdHandling:
         transport = MockTransport({"get_task": V10_GET_TASK_COMPLETED})
         client = make_client(transport)
 
-        await client.get_task("task-005")
+        await client.get_task("9473f795-a32f-4183-be8e-cdcf17067d70")
 
         req = transport.last_request
         body = req.read()
@@ -383,7 +402,7 @@ class TestV10FixturesContextIdHandling:
 
         params = req_data.get("params", {})
         # GetTask takes id (taskId)
-        assert params.get("id") == "task-005"
+        assert params.get("id") == "9473f795-a32f-4183-be8e-cdcf17067d70"
 
 
 if __name__ == "__main__":

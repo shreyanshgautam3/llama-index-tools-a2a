@@ -1,9 +1,1 @@
-{
-  "jsonrpc": "2.0",
-  "error": {
-    "code": -32601,
-    "message": "Method not found",
-    "data": "The method 'SendMessage' is not supported by this server. This server only supports v0.3 method names (message/send, tasks/get)."
-  },
-  "id": 8
-}
+{"error":{"code":-32601,"message":"Method not found"},"id":"err-1","jsonrpc":"2.0"}

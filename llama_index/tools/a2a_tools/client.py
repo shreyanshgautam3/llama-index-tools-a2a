@@ -146,9 +146,14 @@ class BasicA2AClient:
 
     @property
     def base_url(self) -> str:
-        """Get the base URL for API calls."""
+        """Get the base URL for API calls, using protocol-version-aware logic.
+
+        v0.3 uses card.url (fallback to first additionalInterfaces entry
+        only if url is empty); v1.0 uses first supportedInterfaces entry whose
+        protocolBinding is JSONRPC, else returns "".
+        """
         if self._agent_card:
-            return self._agent_card.primary_url
+            return self._agent_card.primary_url_for_version(self.protocol_version)
         return ""
 
     async def close(self) -> None:
@@ -215,7 +220,7 @@ class BasicA2AClient:
         client = await self._get_http_client()
         request_payload = {
             "jsonrpc": "2.0",
-            "id": uuid.uuid4().hex,  # Fresh id per request (Task 5)
+            "id": uuid.uuid4().hex,  # Fresh id per request
             "method": method,
             "params": params,
         }
@@ -292,7 +297,7 @@ class BasicA2AClient:
     def _validate_send_result(self, raw_result: dict) -> SendMessageResult:
         """Validate a raw SendMessage result dict as SendMessageResult.
 
-        Task 2: shared handling for both call_skill and send_message (v1.0 branch).
+        Shared handling for both call_skill and send_message (v1.0 branch).
         On validation failure, returns a SendMessageResult with a task carrying
         an error TaskResult - callers check task.error before proceeding.
 
@@ -332,16 +337,6 @@ class BasicA2AClient:
                         all_parts.append(Part.model_validate(p))
         return all_parts
 
-    # Task 5c: _to_task_result and _to_task_result_v03 are kept as separate methods.
-    # Merging them into a single flow would require a shared intermediate structure
-    # that both versions feed into. The only version-specific step is how the raw
-    # payload becomes a common structure: v1.0 uses Pydantic model_validate (Task),
-    # v0.3 uses raw dict manipulation (id→task_id rename). The downstream
-    # artifact-flattening + error-mapping logic is already shared via _flatten_artifacts
-    # and _map_task_state, which both methods call. Merging would mean duplicating
-    # that shared logic in one place or introducing an artificial intermediate type,
-    # so the two methods are kept separate with their respective version-specific
-    # parsing steps documented here.
     def _to_task_result(self, task: Task, task_state: str) -> TaskResult:
         """Convert a v1.0 Task to TaskResult with artifact flattening and error mapping."""
         error_info = self._map_task_state(task_state)
@@ -380,13 +375,21 @@ class BasicA2AClient:
         task_state = raw_result.get("status", {}).get("state", "unknown")
         error_info = self._map_task_state(task_state)
         if error_info:
+            # Extract text from message parts for error.data.message
+            server_message = None
+            status_msg = raw_result.get("status", {}).get("message")
+            if status_msg and isinstance(status_msg, dict) and status_msg.get("parts"):
+                for p in status_msg["parts"]:
+                    if isinstance(p, dict) and "text" in p:
+                        server_message = p["text"]
+                        break
             return TaskResult(
                 task_id=task_id,
                 error={
                     **error_info,
                     "data": {
                         "state": task_state,
-                        "message": raw_result.get("status", {}).get("message"),
+                        "message": server_message,
                     },
                 },
             )
@@ -405,7 +408,7 @@ class BasicA2AClient:
             )
 
         # Convert Task to TaskResult
-        # Task 5b: when a v0.3 Task has no artifacts, fall back to status.message
+        # When a v0.3 Task has no artifacts, fall back to status.message
         # parts (matching v1.0 _to_task_result behavior)
         artifacts = raw_result.get("artifacts", [])
         all_parts = self._flatten_artifacts(artifacts)
@@ -453,6 +456,12 @@ class BasicA2AClient:
 
         if self.protocol_version == "1.0":
             # v1.0: Extract message and context_id from arguments
+            # base_url (via primary_url_for_version) returns "" if no JSONRPC interface
+            if not self.base_url:
+                return TaskResult(
+                    task_id="",
+                    error={"code": -32000, "message": "no JSONRPC interface found"},
+                )
             message_text = ""
             context_id = None
             if arguments:
@@ -549,6 +558,12 @@ class BasicA2AClient:
 
         if self.protocol_version == "1.0":
             # v1.0: Use SendMessage with contextId on Message
+            # base_url (via primary_url_for_version) returns "" if no JSONRPC interface
+            if not self.base_url:
+                return TaskResult(
+                    task_id="",
+                    error={"code": -32000, "message": "no JSONRPC interface found"},
+                )
             msg = Message(
                 role="ROLE_USER",
                 parts=self._build_v1_parts(message),
@@ -613,6 +628,13 @@ class BasicA2AClient:
             )
 
         if self.protocol_version == "1.0":
+            # v1.0: GetTask
+            # base_url (via primary_url_for_version) returns "" if no JSONRPC interface
+            if not self.base_url:
+                return TaskResult(
+                    task_id=task_id,
+                    error={"code": -32000, "message": "no JSONRPC interface found"},
+                )
             try:
                 raw_result = await self._rpc("GetTask", {"id": task_id})
             except A2AJSONRPCError as e:
@@ -630,11 +652,18 @@ class BasicA2AClient:
                 task_state = task.status.state if task.status else "unknown"
                 error_info = self._map_task_state(task_state)
                 if error_info:
+                    # Extract text from message parts for error.data.message
+                    server_message = None
+                    if task.status and task.status.message and task.status.message.parts:
+                        for part in task.status.message.parts:
+                            if part.text:
+                                server_message = part.text
+                                break
                     return TaskResult(
                         task_id=task.id,
                         error={
                             **error_info,
-                            "data": {"state": task_state, "message": task.status.message},
+                            "data": {"state": task_state, "message": server_message},
                         },
                     )
                 # Return ALL artifacts combined; if none, check status message for working state
