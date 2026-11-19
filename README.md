@@ -162,6 +162,7 @@ python examples/a2a_server.py --port 8000
 
 ## Project Status
 
+- **v0.1.6** (2026-11-19): mypy clean — 53 type errors in `server.py` fixed (str|None defaults, correct kwarg names, `TextPart` wrapping, `preferredTransport` alias, `APIRoute` import), `client.py` v0.3 and v1.0 text extraction from message parts, `models.py` `AgentInterfaceV03` for v0.3 wire format, `Skill` `examples`/`tags` fields, `primary_url_for_version()` helper, 61 tests passing ✅
 - **v0.1.5** (2026-11-19): v1.0 protocol compliance — opt-in v1.0 via `protocol_version="1.0"` (no auto-detection), camelCase wire format via `by_alias=True`, skill_name in `message.metadata` (not embedded in text), contextId on Message object, deduplicated task state mapping with `_flatten_artifacts()`, v0.3 `contextId` handling in `call_skill`, 61 tests passing (verified against PyPI 0.1.5, real v1.0 fixtures from a2a-samples helloworld) ✅
 - **v0.1.4** (2026-11-16): Fixed A2A protocol compliance — v1.0 client method names (`SendMessage`, `GetTask`), discriminated union Part types (no `kind`), contextId on Message object, skill name embedded in message text, proper task state handling (`input-required`, `failed`, `canceled`), v0.3 method name fixes (`message/send`, not `tasks/send`/`messages/send`), removed v1.0 server support (a2a-sdk 0.3.26 limitation), 38 tests passing ✅
 - **v0.1.3** (2026-11-15): A2A v1.0 dual-version support (experimental), multi-turn contextId, honest feature naming, FunctionAgent examples ✅
