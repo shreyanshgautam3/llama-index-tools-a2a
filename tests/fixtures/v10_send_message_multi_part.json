@@ -1,0 +1,63 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task": {
+      "id": "task-007",
+      "contextId": "ctx-007",
+      "status": {
+        "state": "completed"
+      },
+      "history": [],
+      "artifacts": [
+        {
+          "artifactId": "task-007-artifact-1",
+          "parts": [
+            {
+              "text": "Here is the text content"
+            }
+          ],
+          "lastChunk": true
+        },
+        {
+          "artifactId": "task-007-artifact-2",
+          "parts": [
+            {
+              "url": "https://example.com/document.pdf",
+              "mediaType": "application/pdf",
+              "filename": "document.pdf"
+            }
+          ],
+          "lastChunk": true
+        },
+        {
+          "artifactId": "task-007-artifact-3",
+          "parts": [
+            {
+              "raw": "SGVsbG8sIFdvcmxkIQ==",
+              "mediaType": "text/plain",
+              "filename": "hello.txt"
+            }
+          ],
+          "lastChunk": true
+        },
+        {
+          "artifactId": "task-007-artifact-4",
+          "parts": [
+            {
+              "data": {
+                "key": "value",
+                "numbers": [1, 2, 3],
+                "nested": {
+                  "field": "data"
+                }
+              }
+            }
+          ],
+          "lastChunk": true
+        }
+      ],
+      "metadata": {}
+    }
+  },
+  "id": 7
+}

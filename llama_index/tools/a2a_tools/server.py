@@ -229,16 +229,18 @@ def create_agent_card(
         description=description,
         version=version,
         url=url,
-        skills=[Skill(
-            id=skill.id,
-            name=skill.name,
-            description=skill.description,
-            tags=skill.tags,
-            examples=skill.examples,
-            input_modes=skill.input_modes,
-            output_modes=skill.output_modes,
-            # input_schema and output_schema are not standard A2A fields; omit them
-        )],
+        skills=[
+            Skill(
+                id=skill.id,
+                name=skill.name,
+                description=skill.description,
+                tags=skill.tags,
+                examples=skill.examples,
+                input_modes=skill.input_modes,
+                output_modes=skill.output_modes,
+                # input_schema and output_schema are not standard A2A fields; omit them
+            )
+        ],
         capabilities=capabilities,
         provider=provider,
         default_input_modes=["text/plain", "application/json"],
@@ -254,15 +256,17 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
     # Convert skills
     a2a_skills = []
     for s in local_card.skills:
-        a2a_skills.append(AgentSkill(
-            id=s.id,
-            name=s.name,
-            description=s.description,
-            tags=s.tags or ["workflow", "llama-index"],
-            examples=[],
-            input_modes=s.input_modes or ["text/plain", "application/json"],
-            output_modes=s.output_modes or ["text/plain", "application/json"],
-        ))
+        a2a_skills.append(
+            AgentSkill(
+                id=s.id,
+                name=s.name,
+                description=s.description,
+                tags=s.tags or ["workflow", "llama-index"],
+                examples=[],
+                input_modes=s.input_modes or ["text/plain", "application/json"],
+                output_modes=s.output_modes or ["text/plain", "application/json"],
+            )
+        )
 
     # Convert capabilities
     a2a_capabilities = A2AAgentCapabilities(
@@ -275,7 +279,9 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
     # Convert provider
     a2a_provider = A2AAgentProvider(
         organization=local_card.provider.organization if local_card.provider else "LlamaIndex",
-        url=local_card.provider.url if local_card.provider else "https://github.com/run-llama/llama_index",
+        url=local_card.provider.url
+        if local_card.provider
+        else "https://github.com/run-llama/llama_index",
     )
 
     # Build a2a-sdk AgentCard (v0.3 format only)
@@ -287,8 +293,7 @@ def _to_a2a_agent_card(local_card: AgentCard, protocol_version: str = "0.3") -> 
         "skills": a2a_skills,
         "capabilities": a2a_capabilities,
         "provider": a2a_provider,
-        "default_input_modes": local_card.default_input_modes
-        or ["text/plain", "application/json"],
+        "default_input_modes": local_card.default_input_modes or ["text/plain", "application/json"],
         "default_output_modes": local_card.default_output_modes
         or ["text/plain", "application/json"],
         "preferred_transport": local_card.preferred_transport or "JSONRPC",
@@ -392,7 +397,7 @@ def workflow_as_a2a(
 
     # Find and replace the agent-card route
     for i, route in enumerate(app.routes):
-        if hasattr(route, 'path') and route.path == '/.well-known/agent-card.json':
+        if hasattr(route, "path") and route.path == "/.well-known/agent-card.json":
             app.routes[i] = type(route)(
                 path=route.path,
                 endpoint=_serve_local_agent_card,

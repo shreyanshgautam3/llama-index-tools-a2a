@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "message": {
+      "role": "ROLE_AGENT",
+      "parts": [
+        {
+          "text": "Hello, how can I help you?"
+        }
+      ],
+      "messageId": "msg-003",
+      "contextId": "ctx-003"
+    }
+  },
+  "id": 3
+}

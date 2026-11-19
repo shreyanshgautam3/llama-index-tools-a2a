@@ -1,0 +1,47 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "name": "Hello World Agent",
+    "description": "Just a hello world agent",
+    "version": "0.0.1",
+    "defaultInputModes": [
+      "text/plain"
+    ],
+    "defaultOutputModes": [
+      "text/plain"
+    ],
+    "capabilities": {
+      "streaming": true,
+      "pushNotifications": false
+    },
+    "skills": [
+      {
+        "id": "echo_bot",
+        "name": "Echo Bot",
+        "description": "An example agent that acknowledges client request and responds with a \"Hello World\" message.",
+        "tags": [
+          "a2a",
+          "echo-example"
+        ],
+        "examples": [
+          "hi",
+          "how are you"
+        ],
+        "inputModes": [
+          "text/plain"
+        ],
+        "outputModes": [
+          "text/plain"
+        ]
+      }
+    ],
+    "additionalInterfaces": [
+      {
+        "url": "http://127.0.0.1:9999",
+        "protocolBinding": "JSONRPC",
+        "protocolVersion": "1.0"
+      }
+    ]
+  },
+  "id": 7
+}

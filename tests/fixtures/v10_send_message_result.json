@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task": {
+      "id": "task-001",
+      "contextId": "ctx-001",
+      "status": {
+        "state": "completed"
+      },
+      "history": [],
+      "artifacts": [
+        {
+          "artifactId": "task-001-artifact",
+          "parts": [
+            {
+              "text": "Hello, World! I have received your request (hi)"
+            }
+          ],
+          "lastChunk": true
+        }
+      ],
+      "metadata": {}
+    }
+  },
+  "id": 1
+}

@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task": {
+      "id": "task-002",
+      "contextId": "ctx-002",
+      "status": {
+        "state": "working",
+        "message": {
+          "role": "ROLE_AGENT",
+          "parts": [
+            {
+              "text": "Processing request..."
+            }
+          ],
+          "messageId": "msg-002"
+        }
+      },
+      "history": [],
+      "artifacts": [],
+      "metadata": {}
+    }
+  },
+  "id": 2
+}

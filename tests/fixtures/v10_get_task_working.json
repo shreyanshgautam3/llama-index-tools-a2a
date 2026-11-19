@@ -1,0 +1,35 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task": {
+      "id": "task-006",
+      "contextId": "ctx-006",
+      "status": {
+        "state": "working",
+        "message": {
+          "role": "ROLE_AGENT",
+          "parts": [
+            {
+              "text": "Still working..."
+            }
+          ],
+          "messageId": "msg-006"
+        }
+      },
+      "history": [
+        {
+          "role": "ROLE_USER",
+          "parts": [
+            {
+              "text": "hello"
+            }
+          ],
+          "messageId": "msg-006-user"
+        }
+      ],
+      "artifacts": [],
+      "metadata": {}
+    }
+  },
+  "id": 6
+}

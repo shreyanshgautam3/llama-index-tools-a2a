@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "task": {
+      "id": "task-004",
+      "contextId": "ctx-004",
+      "status": {
+        "state": "failed",
+        "message": {
+          "role": "ROLE_AGENT",
+          "parts": [
+            {
+              "text": "An error occurred while processing the request."
+            }
+          ],
+          "messageId": "msg-004"
+        }
+      },
+      "history": [],
+      "artifacts": [],
+      "metadata": {}
+    }
+  },
+  "id": 4
+}
