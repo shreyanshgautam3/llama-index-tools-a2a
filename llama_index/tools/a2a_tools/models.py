@@ -12,33 +12,56 @@ Supports both v0.3 and v1.0 protocol versions.
 - TaskResult: Response from skill/task execution
 """
 
+import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-class TextPart(BaseModel):
-    """Text content part (v1.0: no 'kind' field, discriminated by 'text' presence)."""
+class Part(BaseModel):
+    """Unified v1.0 Part model (discriminated union by field presence).
 
-    text: str
+    Per A2A v1.0 spec, a Part has one of:
+    - text: str (TextPart)
+    - url: str + optional mediaType, filename (FilePart by URL)
+    - raw: bytes + optional mediaType, filename (FilePart by base64)
+    - data: dict (DataPart)
+    - mediaType: str (shared metadata)
+    - filename: str (shared metadata)
+    """
 
+    # Text content
+    text: str | None = None
+    # File by URL
+    url: str | None = None
+    # File by base64 (raw bytes)
+    raw: bytes | None = None
+    # Structured data
+    data: dict[str, Any] | None = None
+    # Optional metadata for file/data parts
+    media_type: str | None = Field(default=None, alias="mediaType")
+    filename: str | None = None
 
-class FilePart(BaseModel):
-    """File content part (v1.0: no 'kind' field, discriminated by 'file' presence)."""
+    model_config = {"populate_by_name": True}
 
-    file: str  # file URI or base64 data
-    mime_type: str | None = None
-    name: str | None = None
+    @field_validator("raw", mode="before")
+    @classmethod
+    def _decode_base64(cls, v):
+        """Decode base64 string to bytes if needed."""
+        if isinstance(v, str):
+            import base64
 
+            return base64.b64decode(v)
+        return v
 
-class DataPart(BaseModel):
-    """Structured data part (v1.0: no 'kind' field, discriminated by 'data' presence)."""
+    def is_text(self) -> bool:
+        return self.text is not None
 
-    data: dict[str, Any]
+    def is_file(self) -> bool:
+        return self.url is not None or self.raw is not None
 
-
-# v1.0 Part is a discriminated union - no 'kind' field
-Part = TextPart | FilePart | DataPart
+    def is_data(self) -> bool:
+        return self.data is not None
 
 
 # v0.3 compatibility: PartWithKind for legacy wire format
@@ -54,17 +77,26 @@ class PartWithKind(BaseModel):
 class Message(BaseModel):
     """A message exchanged between agents.
 
-    v1.0: metadata field for skill name and other extensions.
+    v1.0:
+    - role uses ROLE_USER / ROLE_AGENT (not "user"/"assistant")
+    - messageId is auto-generated UUID if not provided
+    - metadata field for skill name and other extensions
     Uses camelCase aliases for wire format.
     """
 
-    role: Literal["user", "assistant", "system"]
+    role: Literal["ROLE_USER", "ROLE_AGENT", "system"] = "ROLE_USER"
     parts: list[Part]
     message_id: str | None = Field(default=None, alias="messageId")
     context_id: str | None = Field(default=None, alias="contextId")
     metadata: dict[str, Any] | None = None
 
     model_config = {"populate_by_name": True}
+
+    def __init__(self, **data):
+        # Auto-generate messageId for v1.0 if not provided
+        if "message_id" not in data and "messageId" not in data:
+            data["message_id"] = str(uuid.uuid4())
+        super().__init__(**data)
 
 
 class TaskInput(BaseModel):
@@ -101,9 +133,19 @@ class TaskStatus(BaseModel):
     """Task status in v1.0.
 
     Uses camelCase aliases for wire format.
+    States: submitted, working, input-required, completed, failed, canceled, rejected, auth-required
     """
 
-    state: Literal["submitted", "working", "input-required", "completed", "failed", "canceled"]
+    state: Literal[
+        "submitted",
+        "working",
+        "input-required",
+        "completed",
+        "failed",
+        "canceled",
+        "rejected",
+        "auth-required",
+    ]
     message: Message | None = None
     timestamp: str | None = None
 
@@ -161,10 +203,16 @@ class AgentProvider(BaseModel):
 
 
 class AgentInterface(BaseModel):
-    """Agent interface declaration for v1.0 additionalInterfaces (a2a-sdk)."""
+    """Agent interface declaration for v1.0 additionalInterfaces.
+
+    v1.0 uses protocolBinding + protocolVersion (not transport).
+    """
 
     url: str
-    transport: Literal["JSONRPC", "GRPC", "HTTP+JSON"]
+    protocol_binding: str = Field(alias="protocolBinding")
+    protocol_version: str = Field(alias="protocolVersion")
+
+    model_config = {"populate_by_name": True}
 
 
 class AgentCard(BaseModel):

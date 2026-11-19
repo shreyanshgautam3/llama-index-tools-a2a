@@ -30,13 +30,13 @@ import httpx
 
 from .models import (
     AgentCard,
+    Artifact,
     Message,
     Part,
     SendMessageResult,
     Task,
     TaskOutput,
     TaskResult,
-    TextPart,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,23 +177,24 @@ class BasicA2AClient:
 
     # ---- Skill Invocation Methods ----
 
-    async def _send_v1_request(self, method: str, params: dict) -> dict:
-        """Send a v1.0 JSON-RPC request with A2A-Version header."""
-        client = await self._get_http_client()
-        request_payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": method,
-            "params": params,
-        }
-        response = await client.post(
-            self.base_url, json=request_payload, headers=self._get_request_headers()
-        )
-        response.raise_for_status()
-        return response.json()
+    async def _rpc(self, method: str, params: dict) -> dict:
+        """Send a JSON-RPC request and return the "result" field, or raise on error.
 
-    async def _send_v03_request(self, method: str, params: dict) -> dict:
-        """Send a v0.3 JSON-RPC request to the base URL (not skill-specific endpoint)."""
+        Handles both v0.3 and v1.0. Checks the JSON-RPC response for an "error"
+        field before returning, so callers never see a swallowed error as an
+        empty dict.
+
+        Args:
+            method: The JSON-RPC method name.
+            params: The params object to send.
+
+        Returns:
+            The "result" field from the JSON-RPC response.
+
+        Raises:
+            httpx.HTTPStatusError: If the HTTP request fails.
+            RuntimeError: If the JSON-RPC response contains an error.
+        """
         client = await self._get_http_client()
         request_payload = {
             "jsonrpc": "2.0",
@@ -205,7 +206,14 @@ class BasicA2AClient:
             self.base_url, json=request_payload, headers=self._get_request_headers()
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        if "error" in data:
+            err = data["error"]
+            raise RuntimeError(
+                f"JSON-RPC error from '{method}': code={err.get('code')} "
+                f"message={err.get('message')!r} data={err.get('data')}"
+            )
+        return data.get("result", {})
 
     def _build_v1_message(
         self, skill_name: str, message_text: str, context_id: str | None = None
@@ -213,8 +221,8 @@ class BasicA2AClient:
         """Build a v1.0 Message with skill_name in metadata and contextId on the Message."""
         # v1.0: put skill name in message.metadata, not in text
         msg = Message(
-            role="user",
-            parts=[TextPart(text=message_text)],
+            role="ROLE_USER",
+            parts=[Part(text=message_text)],
             context_id=context_id,
         )
         if skill_name:
@@ -223,7 +231,7 @@ class BasicA2AClient:
 
     def _build_v1_parts(self, message_text: str) -> list[Part]:
         """Build v1.0 parts (discriminated union, no 'kind' field)."""
-        return [TextPart(text=message_text)]
+        return [Part(text=message_text)]
 
     def _build_v03_parts(self, message_text: str) -> list[dict]:
         """Build v0.3 parts (with 'kind' field for wire compatibility)."""
@@ -247,6 +255,94 @@ class BasicA2AClient:
         if state == "canceled":
             return {"code": -32003, "message": "Task was canceled"}
         return None
+
+    def _flatten_artifacts(self, artifacts: list[Artifact] | list[dict] | None) -> list[Part]:
+        """Flatten artifacts into a list of Parts (shared by v1.0 and v0.3)."""
+        all_parts = []
+        if artifacts:
+            for artifact in artifacts:
+                parts = artifact.parts if hasattr(artifact, "parts") else artifact.get("parts", [])
+                for p in parts:
+                    if hasattr(p, "model_dump"):
+                        # It's a Part model, keep as-is
+                        all_parts.append(p)
+                    elif isinstance(p, dict):
+                        # It's a dict, convert to Part
+                        all_parts.append(Part.model_validate(p))
+        return all_parts
+
+    def _to_task_result(self, task: Task, task_state: str) -> TaskResult:
+        """Convert a v1.0 Task to TaskResult with artifact flattening and error mapping."""
+        error_info = self._map_task_state(task_state)
+        if error_info:
+            # Use server's error message if available
+            server_message = None
+            if task.status and task.status.message and task.status.message.parts:
+                for part in task.status.message.parts:
+                    if part.text:
+                        server_message = part.text
+                        break
+            return TaskResult(
+                task_id=task.id,
+                error={
+                    **error_info,
+                    "data": {"state": task_state, "message": server_message},
+                },
+            )
+        # Flatten artifacts; if none, check status message for working/input-required states
+        all_parts = self._flatten_artifacts(task.artifacts)
+        if not all_parts and task.status and task.status.message and task.status.message.parts:
+            all_parts.extend(task.status.message.parts)
+        return TaskResult(
+            task_id=task.id,
+            output=TaskOutput(parts=all_parts) if all_parts else None,
+            metadata=task.metadata,
+        )
+
+    def _to_task_result_v03(self, raw_result: dict) -> TaskResult:
+        """Convert a v0.3 Task dict to TaskResult with artifact flattening and error mapping."""
+        if "id" in raw_result and "task_id" not in raw_result:
+            raw_result["task_id"] = raw_result.pop("id")
+        task_id = raw_result.get("task_id") or raw_result.get("id") or ""
+
+        # Check task state for v0.3 using shared helper
+        task_state = raw_result.get("status", {}).get("state", "unknown")
+        error_info = self._map_task_state(task_state)
+        if error_info:
+            return TaskResult(
+                task_id=task_id,
+                error={
+                    **error_info,
+                    "data": {
+                        "state": task_state,
+                        "message": raw_result.get("status", {}).get("message"),
+                    },
+                },
+            )
+
+        # Handle case where message/send returns a Message instead of a Task
+        if "artifacts" not in raw_result and "parts" in raw_result:
+            # It's a Message response
+            parts = raw_result.get("parts", [])
+            converted_parts = []
+            for p in parts:
+                if "text" in p:
+                    converted_parts.append(Part(text=p["text"]))
+            return TaskResult(
+                task_id="",
+                output=TaskOutput(parts=converted_parts),
+            )
+
+        # Convert Task to TaskResult
+        artifacts = raw_result.get("artifacts", [])
+        all_parts = self._flatten_artifacts(artifacts)
+        output = TaskOutput(parts=all_parts) if all_parts else None
+        return TaskResult(
+            task_id=task_id,
+            output=output,
+            error=None,
+            metadata=raw_result.get("metadata", {}),
+        )
 
     async def call_skill(
         self,
@@ -282,37 +378,18 @@ class BasicA2AClient:
             # Build v1.0 message with skill_name in metadata
             msg = self._build_v1_message(skill_name, message_text, context_id)
 
-            params = {
-                "message": msg.model_dump(by_alias=True, exclude_none=True)
-            }
+            params = {"message": msg.model_dump(by_alias=True, exclude_none=True)}
 
-            result = await self._send_v1_request("SendMessage", params)
-            raw_result = result.get("result", {})
+            try:
+                raw_result = await self._rpc("SendMessage", params)
+            except RuntimeError as e:
+                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
+
             # v1.0 SendMessage returns either task or message
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
-                task = send_result.task
-                # Check task state using shared helper
-                task_state = task.status.state if task.status else "unknown"
-                error_info = self._map_task_state(task_state)
-                if error_info:
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            **error_info,
-                            "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                # Return ALL artifacts combined
-                all_parts = []
-                if task.artifacts:
-                    for artifact in task.artifacts:
-                        all_parts.extend(artifact.parts)
-                return TaskResult(
-                    task_id=task.id,
-                    output=TaskOutput(parts=all_parts) if all_parts else None,
-                    metadata=task.metadata,
-                )
+                task_state = send_result.task.status.state if send_result.task.status else "unknown"
+                return self._to_task_result(send_result.task, task_state)
             elif send_result.message:
                 # SendMessage returned a Message directly (not a Task)
                 return TaskResult(
@@ -333,6 +410,9 @@ class BasicA2AClient:
                 # Direct call_skill call: serialize the arguments as workflow input
                 message_text = json.dumps(arguments) if arguments else "{}"
 
+            # v0.3: Extract context_id from arguments (FIX: was missing)
+            context_id = arguments.get("context_id") if arguments else None
+
             input_parts = self._build_v03_parts(message_text)
 
             # v0.3 uses base URL, not skill-specific endpoint (endpoint is not an A2A field)
@@ -344,47 +424,18 @@ class BasicA2AClient:
                     "messageId": f"msg-{uuid.uuid4().hex[:8]}",
                     "role": "user",
                     "parts": input_parts,
+                    **({"contextId": context_id} if context_id else {}),
                 }
             }
-            result = await self._send_v03_request("message/send", params)
-            raw_result = result.get("result", {})
+            try:
+                raw_result = await self._rpc("message/send", params)
+            except RuntimeError as e:
+                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
+
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
             # v0.3 returns a full Task object - convert to TaskResult
-            task_id = raw_result.get("id") or raw_result.get("task_id") or ""
-
-            # Check task state for v0.3 using shared helper
-            task_state = raw_result.get("status", {}).get("state", "unknown")
-            error_info = self._map_task_state(task_state)
-            if error_info:
-                return TaskResult(
-                    task_id=task_id,
-                    error={
-                        **error_info,
-                        "data": {
-                            "state": task_state,
-                            "message": raw_result.get("status", {}).get("message"),
-                        },
-                    },
-                )
-
-            artifacts = raw_result.get("artifacts", [])
-            output = None
-            if artifacts:
-                # Get parts from ALL artifacts
-                all_parts = []
-                for artifact in artifacts:
-                    parts = artifact.get("parts", [])
-                    for p in parts:
-                        if "text" in p:
-                            all_parts.append(TextPart(text=p["text"]))
-                output = TaskOutput(parts=all_parts) if all_parts else None
-            return TaskResult(
-                task_id=task_id,
-                output=output,
-                error=None,
-                metadata=raw_result.get("metadata", {}),
-            )
+            return self._to_task_result_v03(raw_result)
 
     async def send_message(
         self,
@@ -406,38 +457,20 @@ class BasicA2AClient:
         if self.protocol_version == "1.0":
             # v1.0: Use SendMessage with contextId on Message
             msg = Message(
-                role="user",
+                role="ROLE_USER",
                 parts=self._build_v1_parts(message),
                 context_id=context_id,
             )
-            params = {
-                "message": msg.model_dump(by_alias=True, exclude_none=True)
-            }
-            result = await self._send_v1_request("SendMessage", params)
-            raw_result = result.get("result", {})
+            params = {"message": msg.model_dump(by_alias=True, exclude_none=True)}
+            try:
+                raw_result = await self._rpc("SendMessage", params)
+            except RuntimeError as e:
+                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
             send_result = SendMessageResult.model_validate(raw_result)
             if send_result.task:
-                task = send_result.task
-                # Check task state using shared helper
-                task_state = task.status.state if task.status else "unknown"
-                error_info = self._map_task_state(task_state)
-                if error_info:
-                    return TaskResult(
-                        task_id=task.id,
-                        error={
-                            **error_info,
-                            "data": {"state": task_state, "message": task.status.message},
-                        },
-                    )
-                # Wrap in TaskOutput for consistency with call_skill - return ALL artifacts
-                all_parts = []
-                if task.artifacts:
-                    for artifact in task.artifacts:
-                        all_parts.extend(artifact.parts)
-                return TaskResult(
-                    task_id=task.id,
-                    output=TaskOutput(parts=all_parts) if all_parts else None,
-                    metadata=task.metadata,
+                return self._to_task_result(
+                    send_result.task,
+                    send_result.task.status.state if send_result.task.status else "unknown",
                 )
             elif send_result.message:
                 # SendMessage returned a Message directly (not a Task)
@@ -448,63 +481,16 @@ class BasicA2AClient:
             return TaskResult(task_id="")
         else:
             # v0.3: Use message/send
-            params = {
-                "message": self._build_v03_message(message, context_id)
-            }
+            params = {"message": self._build_v03_message(message, context_id)}
             # v0.3: contextId is NOT a top-level param; it goes inside message if needed
 
-            result = await self._send_v03_request("message/send", params)
-            raw_result = result.get("result", {})
+            try:
+                raw_result = await self._rpc("message/send", params)
+            except RuntimeError as e:
+                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
-
-            # Check task state for v0.3 using shared helper
-            task_state = raw_result.get("status", {}).get("state", "unknown")
-            error_info = self._map_task_state(task_state)
-            if error_info:
-                return TaskResult(
-                    task_id=raw_result.get("task_id") or raw_result.get("id") or "",
-                    error={
-                        **error_info,
-                        "data": {
-                            "state": task_state,
-                            "message": raw_result.get("status", {}).get("message"),
-                        },
-                    },
-                )
-
-            # Handle case where message/send returns a Message instead of a Task
-            if "artifacts" not in raw_result and "parts" in raw_result:
-                # It's a Message response
-                parts = raw_result.get("parts", [])
-                converted_parts = []
-                for p in parts:
-                    if "text" in p:
-                        converted_parts.append(TextPart(text=p["text"]))
-                return TaskResult(
-                    task_id="",
-                    output=TaskOutput(parts=converted_parts),
-                )
-
-            # Convert Task to TaskResult (same logic as call_skill)
-            task_id = raw_result.get("id") or raw_result.get("task_id") or ""
-            artifacts = raw_result.get("artifacts", [])
-            output = None
-            if artifacts:
-                # Return ALL artifacts combined
-                all_parts = []
-                for artifact in artifacts:
-                    parts = artifact.get("parts", [])
-                    for p in parts:
-                        if "text" in p:
-                            all_parts.append(TextPart(text=p["text"]))
-                output = TaskOutput(parts=all_parts) if all_parts else None
-            return TaskResult(
-                task_id=task_id,
-                output=output,
-                error=None,
-                metadata=raw_result.get("metadata", {}),
-            )
+            return self._to_task_result_v03(raw_result)
 
     async def get_task(self, task_id: str) -> TaskResult:
         """
@@ -525,16 +511,16 @@ class BasicA2AClient:
             )
 
         if self.protocol_version == "1.0":
-            result = await self._send_v1_request("GetTask", {"id": task_id})
-            # Check for JSON-RPC error
-            if "error" in result:
-                return TaskResult(
-                    task_id=task_id,
-                    error=result["error"],
-                )
-            raw_result = result.get("result", {})
             try:
-                task = Task.model_validate(raw_result)
+                raw_result = await self._rpc("GetTask", {"id": task_id})
+            except RuntimeError as e:
+                return TaskResult(task_id=task_id, error={"code": -32601, "message": str(e)})
+            # v1.0 GetTask returns {"task": {...}} - extract task before validating
+            task_data = raw_result
+            if isinstance(raw_result, dict):
+                task_data = raw_result.get("task", raw_result)
+            try:
+                task = Task.model_validate(task_data)
                 # v1.0: Check task state for input-required, failed, canceled using shared helper
                 task_state = task.status.state if task.status else "unknown"
                 error_info = self._map_task_state(task_state)
@@ -546,11 +532,15 @@ class BasicA2AClient:
                             "data": {"state": task_state, "message": task.status.message},
                         },
                     )
-                # Return ALL artifacts combined
+                # Return ALL artifacts combined; if none, check status message for working state
                 all_parts = []
                 if task.artifacts:
                     for artifact in task.artifacts:
                         all_parts.extend(artifact.parts)
+                if not all_parts and task.status and task.status.message:
+                    msg = task.status.message
+                    if msg.parts:
+                        all_parts.extend(msg.parts)
                 return TaskResult(
                     task_id=task.id,
                     output=TaskOutput(parts=all_parts) if all_parts else None,
@@ -562,17 +552,14 @@ class BasicA2AClient:
                     error={"code": -32603, "message": f"Failed to parse task result: {e}"},
                 )
         else:
-            result = await self._send_v03_request("tasks/get", {"id": task_id})
-            if "error" in result:
-                return TaskResult(
-                    task_id=task_id,
-                    error=result["error"],
-                )
-            raw_result = result.get("result", {})
+            try:
+                raw_result = await self._rpc("tasks/get", {"id": task_id})
+            except RuntimeError as e:
+                return TaskResult(task_id=task_id, error={"code": -32601, "message": str(e)})
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
             try:
-                return TaskResult.model_validate(raw_result)
+                return self._to_task_result_v03(raw_result)
             except Exception as e:
                 return TaskResult(
                     task_id=task_id,

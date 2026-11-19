@@ -48,6 +48,7 @@ async def test_v10_agent_card_format_not_supported():
     """Test that v1.0 AgentCard format is NOT supported by server (sdk limitation)."""
     # v1.0 is not supported - create_agent_card should raise NotImplementedError
     from llama_index.tools.a2a_tools.server import create_agent_card
+
     with pytest.raises(NotImplementedError):
         create_agent_card(SimpleWorkflow(), protocol_version="1.0")
 
@@ -210,7 +211,7 @@ async def test_version_auto_detection():
         a2a_client._detected_version = None
 
         # Simulate detection logic - should be v0.3 since no supported_interfaces
-        has_supported = getattr(a2a_client._agent_card, 'supported_interfaces', None)
+        has_supported = getattr(a2a_client._agent_card, "supported_interfaces", None)
         if has_supported:
             detected = "1.0"
         else:
@@ -294,9 +295,7 @@ async def test_client_v03_call_skill():
         card = card_resp.json()
 
         # Create A2A client with the real HTTP transport
-        a2a_client = BasicA2AClient(
-            "http://test/.well-known/agent-card.json"
-        )
+        a2a_client = BasicA2AClient("http://test/.well-known/agent-card.json")
         # Replace the internal HTTP client with our test client
         a2a_client._http_client = http_client
         a2a_client._agent_card = AgentCard.model_validate(card)

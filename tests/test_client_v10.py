@@ -21,7 +21,13 @@ async def test_version_detection_v10_supported_interfaces():
         name="TestAgent",
         url="http://example.com",
         skills=[Skill(name="skill1", description="A skill")],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     mock_response = MagicMock()
@@ -72,7 +78,13 @@ async def test_version_detection_not_fooled_by_additional_interfaces():
         skills=[Skill(name="skill1", description="A skill")],
         # additional_interfaces is a2a-sdk 0.3.26 internal field
         # It should NOT cause v1.0 detection
-        additional_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        additional_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     mock_response = MagicMock()
@@ -93,7 +105,13 @@ async def test_call_skill_v10_method_name():
         name="TestAgent",
         url="http://example.com",
         skills=[Skill(name="my-skill", description="A skill")],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response matches SendMessageResult structure (snake_case for Pydantic models)
@@ -156,7 +174,13 @@ async def test_send_message_v10_context_id_on_message():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response matches SendMessageResult with message
@@ -166,7 +190,7 @@ async def test_send_message_v10_context_id_on_message():
         "jsonrpc": "2.0",
         "result": {
             "message": {
-                "role": "assistant",
+                "role": "ROLE_AGENT",
                 "parts": [{"text": "response"}],
                 "contextId": "ctx-789",
             }
@@ -207,7 +231,13 @@ async def test_get_task_v10_method_name():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response matches Task structure (GetTask returns Task directly) - snake_case for Pydantic
@@ -253,7 +283,13 @@ async def test_get_task_v10_handles_input_required():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response with input-required state - snake_case for Pydantic
@@ -268,7 +304,7 @@ async def test_get_task_v10_handles_input_required():
                 "state": "input-required",
                 "timestamp": "2024-01-01T00:00:00Z",
                 "message": {
-                    "role": "assistant",
+                    "role": "ROLE_AGENT",
                     "parts": [{"text": "Please provide more info"}],
                     "message_id": "msg-1",
                 },
@@ -301,7 +337,13 @@ async def test_get_task_v10_handles_failed():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response with failed state - snake_case for Pydantic
@@ -316,7 +358,7 @@ async def test_get_task_v10_handles_failed():
                 "state": "failed",
                 "timestamp": "2024-01-01T00:00:00Z",
                 "message": {
-                    "role": "assistant",
+                    "role": "ROLE_AGENT",
                     "parts": [{"text": "Internal error"}],
                     "message_id": "msg-1",
                 },
@@ -349,7 +391,13 @@ async def test_get_task_v10_handles_canceled():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response with canceled state - snake_case for Pydantic
@@ -474,7 +522,13 @@ async def test_v10_parts_no_kind_field():
         name="TestAgent",
         url="http://example.com",
         skills=[],
-        supported_interfaces=[AgentInterface(url="http://example.com", transport="JSONRPC")],
+        supported_interfaces=[
+            AgentInterface(
+                url="http://example.com",
+                protocol_binding="JSONRPC",
+                protocol_version="1.0",
+            )
+        ],
     )
 
     # Mock response matches SendMessageResult with message
@@ -484,7 +538,7 @@ async def test_v10_parts_no_kind_field():
         "jsonrpc": "2.0",
         "result": {
             "message": {
-                "role": "assistant",
+                "role": "ROLE_AGENT",
                 "parts": [{"text": "response"}],
             }
         },
@@ -523,19 +577,33 @@ async def test_v10_parts_no_kind_field():
 @pytest.mark.asyncio
 async def test_v10_fake_server_call_skill():
     """Test v1.0 call_skill against a fake v1.0 server using MockTransport."""
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         # httpx.MockTransport gives relative URL path
         url_path = str(request.url)
         if url_path.endswith("/.well-known/agent-card.json"):
-            return httpx.Response(200, json={
-                "name": "FakeV10Agent",
-                "url": "http://fake.example.com",
-                "skills": [{"name": "fake-skill", "description": "A fake skill"}],
-                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "name": "FakeV10Agent",
+                    "url": "http://fake.example.com",
+                    "skills": [{"name": "fake-skill", "description": "A fake skill"}],
+                    "supportedInterfaces": [
+                        {
+                            "url": "http://fake.example.com",
+                            "protocolBinding": "JSONRPC",
+                            "protocolVersion": "1.0",
+                        }
+                    ],
+                },
+            )
 
         # POST to root path
-        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+        if request.method == "POST" and url_path in (
+            "/",
+            "http://fake.example.com",
+            "http://fake.example.com/",
+        ):
             body = json.loads(request.content)
             if body.get("method") == "SendMessage":
                 # Verify A2A-Version header
@@ -553,23 +621,35 @@ async def test_v10_fake_server_call_skill():
                 # Verify no 'kind' field in parts
                 assert "kind" not in body["params"]["message"]["parts"][0]
 
-                return httpx.Response(200, json={
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "task": {
-                            "id": "task-fake-1",
-                            "context_id": "ctx-test",
-                            "status": {"state": "completed", "timestamp": "2024-01-01T00:00:00Z"},
-                            "artifacts": [
-                                {"artifact_id": "art-1",
-                                 "parts": [{"text": "artifact 1"}], "index": 0},
-                                {"artifact_id": "art-2",
-                                 "parts": [{"text": "artifact 2"}], "index": 1},
-                            ],
-                        }
+                return httpx.Response(
+                    200,
+                    json={
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "task": {
+                                "id": "task-fake-1",
+                                "context_id": "ctx-test",
+                                "status": {
+                                    "state": "completed",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                },
+                                "artifacts": [
+                                    {
+                                        "artifact_id": "art-1",
+                                        "parts": [{"text": "artifact 1"}],
+                                        "index": 0,
+                                    },
+                                    {
+                                        "artifact_id": "art-2",
+                                        "parts": [{"text": "artifact 2"}],
+                                        "index": 1,
+                                    },
+                                ],
+                            }
+                        },
+                        "id": body.get("id"),
                     },
-                    "id": body.get("id"),
-                })
+                )
 
         return httpx.Response(404)
 
@@ -602,17 +682,31 @@ async def test_v10_fake_server_call_skill():
 @pytest.mark.asyncio
 async def test_v10_fake_server_send_message():
     """Test v1.0 send_message against a fake v1.0 server using MockTransport."""
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         url_path = str(request.url)
         if url_path.endswith("/.well-known/agent-card.json"):
-            return httpx.Response(200, json={
-                "name": "FakeV10Agent",
-                "url": "http://fake.example.com",
-                "skills": [],
-                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "name": "FakeV10Agent",
+                    "url": "http://fake.example.com",
+                    "skills": [],
+                    "supportedInterfaces": [
+                        {
+                            "url": "http://fake.example.com",
+                            "protocolBinding": "JSONRPC",
+                            "protocolVersion": "1.0",
+                        }
+                    ],
+                },
+            )
 
-        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+        if request.method == "POST" and url_path in (
+            "/",
+            "http://fake.example.com",
+            "http://fake.example.com/",
+        ):
             body = json.loads(request.content)
             if body.get("method") == "SendMessage":
                 assert request.headers.get("A2A-Version") == "1.0"
@@ -622,17 +716,20 @@ async def test_v10_fake_server_send_message():
                 assert "kind" not in body["params"]["message"]["parts"][0]
 
                 # Return a Message response (not a Task)
-                return httpx.Response(200, json={
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "message": {
-                            "role": "assistant",
-                            "parts": [{"text": "direct response"}],
-                            "contextId": "ctx-send",
-                        }
+                return httpx.Response(
+                    200,
+                    json={
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "message": {
+                                "role": "ROLE_AGENT",
+                                "parts": [{"text": "direct response"}],
+                                "contextId": "ctx-send",
+                            }
+                        },
+                        "id": body.get("id"),
                     },
-                    "id": body.get("id"),
-                })
+                )
 
         return httpx.Response(404)
 
@@ -657,20 +754,32 @@ async def test_v10_fake_server_send_message():
 @pytest.mark.asyncio
 async def test_v10_fake_server_get_task_states():
     """Test v1.0 get_task handles all terminal states against fake server."""
+
     async def make_handler(state: str, message_text: str = ""):
         async def mock_handler(request: httpx.Request) -> httpx.Response:
             url_path = str(request.url)
             if url_path.endswith("/.well-known/agent-card.json"):
-                return httpx.Response(200, json={
-                    "name": "FakeV10Agent",
-                    "url": "http://fake.example.com",
-                    "skills": [],
-                    "supportedInterfaces": [
-                        {"url": "http://fake.example.com", "transport": "JSONRPC"},
-                    ],
-                })
+                return httpx.Response(
+                    200,
+                    json={
+                        "name": "FakeV10Agent",
+                        "url": "http://fake.example.com",
+                        "skills": [],
+                        "supportedInterfaces": [
+                            {
+                                "url": "http://fake.example.com",
+                                "protocolBinding": "JSONRPC",
+                                "protocolVersion": "1.0",
+                            },
+                        ],
+                    },
+                )
 
-            if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+            if request.method == "POST" and url_path in (
+                "/",
+                "http://fake.example.com",
+                "http://fake.example.com/",
+            ):
                 body = json.loads(request.content)
                 if body.get("method") == "GetTask":
                     assert request.headers.get("A2A-Version") == "1.0"
@@ -678,56 +787,66 @@ async def test_v10_fake_server_get_task_states():
                     assert body["params"]["id"] == "task-state-test"
 
                     if state == "input-required":
-                        return httpx.Response(200, json={
-                            "jsonrpc": "2.0",
-                            "result": {
-                                "id": "task-state-test",
-                                "context_id": "ctx-test",
-                                "status": {
-                                    "state": "input-required",
-                                    "timestamp": "2024-01-01T00:00:00Z",
-                                    "message": {
-                                        "role": "assistant",
-                                        "parts": [{"text": message_text}],
-                                        "message_id": "msg-1",
+                        return httpx.Response(
+                            200,
+                            json={
+                                "jsonrpc": "2.0",
+                                "result": {
+                                    "id": "task-state-test",
+                                    "context_id": "ctx-test",
+                                    "status": {
+                                        "state": "input-required",
+                                        "timestamp": "2024-01-01T00:00:00Z",
+                                        "message": {
+                                            "role": "ROLE_AGENT",
+                                            "parts": [{"text": message_text}],
+                                            "message_id": "msg-1",
+                                        },
                                     },
                                 },
+                                "id": body.get("id"),
                             },
-                            "id": body.get("id"),
-                        })
+                        )
                     elif state == "failed":
-                        return httpx.Response(200, json={
-                            "jsonrpc": "2.0",
-                            "result": {
-                                "id": "task-state-test",
-                                "context_id": "ctx-test",
-                                "status": {
-                                    "state": "failed",
-                                    "timestamp": "2024-01-01T00:00:00Z",
-                                    "message": {
-                                        "role": "assistant",
-                                        "parts": [{"text": message_text}],
-                                        "message_id": "msg-1",
+                        return httpx.Response(
+                            200,
+                            json={
+                                "jsonrpc": "2.0",
+                                "result": {
+                                    "id": "task-state-test",
+                                    "context_id": "ctx-test",
+                                    "status": {
+                                        "state": "failed",
+                                        "timestamp": "2024-01-01T00:00:00Z",
+                                        "message": {
+                                            "role": "ROLE_AGENT",
+                                            "parts": [{"text": message_text}],
+                                            "message_id": "msg-1",
+                                        },
                                     },
                                 },
+                                "id": body.get("id"),
                             },
-                            "id": body.get("id"),
-                        })
+                        )
                     elif state == "canceled":
-                        return httpx.Response(200, json={
-                            "jsonrpc": "2.0",
-                            "result": {
-                                "id": "task-state-test",
-                                "context_id": "ctx-test",
-                                "status": {
-                                    "state": "canceled",
-                                    "timestamp": "2024-01-01T00:00:00Z",
+                        return httpx.Response(
+                            200,
+                            json={
+                                "jsonrpc": "2.0",
+                                "result": {
+                                    "id": "task-state-test",
+                                    "context_id": "ctx-test",
+                                    "status": {
+                                        "state": "canceled",
+                                        "timestamp": "2024-01-01T00:00:00Z",
+                                    },
                                 },
+                                "id": body.get("id"),
                             },
-                            "id": body.get("id"),
-                        })
+                        )
 
             return httpx.Response(404)
+
         return mock_handler
 
     states = [
@@ -761,35 +880,67 @@ async def test_v10_fake_server_get_task_states():
 @pytest.mark.asyncio
 async def test_v10_fake_server_multiple_artifacts():
     """Test v1.0 client returns ALL artifacts, not just first."""
+
     async def mock_handler(request: httpx.Request) -> httpx.Response:
         url_path = str(request.url)
         if url_path.endswith("/.well-known/agent-card.json"):
-            return httpx.Response(200, json={
-                "name": "FakeV10Agent",
-                "url": "http://fake.example.com",
-                "skills": [{"name": "multi-skill", "description": "Multi-artifact skill"}],
-                "supportedInterfaces": [{"url": "http://fake.example.com", "transport": "JSONRPC"}],
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "name": "FakeV10Agent",
+                    "url": "http://fake.example.com",
+                    "skills": [{"name": "multi-skill", "description": "Multi-artifact skill"}],
+                    "supportedInterfaces": [
+                        {
+                            "url": "http://fake.example.com",
+                            "protocolBinding": "JSONRPC",
+                            "protocolVersion": "1.0",
+                        }
+                    ],
+                },
+            )
 
-        if request.method == "POST" and url_path in ("/", "http://fake.example.com", "http://fake.example.com/"):
+        if request.method == "POST" and url_path in (
+            "/",
+            "http://fake.example.com",
+            "http://fake.example.com/",
+        ):
             body = json.loads(request.content)
             if body.get("method") == "SendMessage":
-                return httpx.Response(200, json={
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "task": {
-                            "id": "task-multi",
-                            "context_id": "ctx-multi",
-                            "status": {"state": "completed", "timestamp": "2024-01-01T00:00:00Z"},
-                            "artifacts": [
-                                {"artifact_id": "art-1", "parts": [{"text": "part 1"}], "index": 0},
-                                {"artifact_id": "art-2", "parts": [{"text": "part 2"}], "index": 1},
-                                {"artifact_id": "art-3", "parts": [{"text": "part 3"}], "index": 2},
-                            ],
-                        }
+                return httpx.Response(
+                    200,
+                    json={
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "task": {
+                                "id": "task-multi",
+                                "context_id": "ctx-multi",
+                                "status": {
+                                    "state": "completed",
+                                    "timestamp": "2024-01-01T00:00:00Z",
+                                },
+                                "artifacts": [
+                                    {
+                                        "artifact_id": "art-1",
+                                        "parts": [{"text": "part 1"}],
+                                        "index": 0,
+                                    },
+                                    {
+                                        "artifact_id": "art-2",
+                                        "parts": [{"text": "part 2"}],
+                                        "index": 1,
+                                    },
+                                    {
+                                        "artifact_id": "art-3",
+                                        "parts": [{"text": "part 3"}],
+                                        "index": 2,
+                                    },
+                                ],
+                            }
+                        },
+                        "id": body.get("id"),
                     },
-                    "id": body.get("id"),
-                })
+                )
 
         return httpx.Response(404)
 
