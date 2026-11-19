@@ -133,10 +133,25 @@ class TaskStatus(BaseModel):
     """Task status in v1.0.
 
     Uses camelCase aliases for wire format.
-    States: submitted, working, input-required, completed, failed, canceled, rejected, auth-required
+    v1.0 states: TASK_STATE_SUBMITTED, TASK_STATE_WORKING, TASK_STATE_COMPLETED,
+    TASK_STATE_FAILED, TASK_STATE_CANCELED, TASK_STATE_REJECTED,
+    TASK_STATE_INPUT_REQUIRED, TASK_STATE_AUTH_REQUIRED, TASK_STATE_UNSPECIFIED
+    v0.3 states (kept for wire compatibility when parsing raw dicts): submitted,
+    working, input-required, completed, failed, canceled, rejected, auth-required
     """
 
     state: Literal[
+        # v1.0 forms
+        "TASK_STATE_SUBMITTED",
+        "TASK_STATE_WORKING",
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+        "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED",
+        "TASK_STATE_INPUT_REQUIRED",
+        "TASK_STATE_AUTH_REQUIRED",
+        "TASK_STATE_UNSPECIFIED",
+        # v0.3 forms (for backward compatibility when parsing raw dicts)
         "submitted",
         "working",
         "input-required",

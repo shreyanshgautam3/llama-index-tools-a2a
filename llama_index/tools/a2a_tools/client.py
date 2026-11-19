@@ -42,6 +42,23 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 
+class A2AJSONRPCError(RuntimeError):
+    """JSON-RPC error with structured code, message, and data.
+
+    Raised from _rpc when a JSON-RPC response contains an "error" field.
+    Callers should copy code/message into TaskResult.error to preserve
+    the real JSON-RPC error code instead of hard-coding -32601.
+    """
+
+    def __init__(self, code: int, message: str, data: Any = None, method: str = ""):
+        self.code = code
+        self.message = message
+        self.data = data
+        self.method = method
+        desc = f"JSON-RPC error from '{method}': code={code} message={message!r} data={data}"
+        super().__init__(desc)
+
+
 class BasicA2AClient:
     """
     Basic A2A client for connecting to an A2A agent.
@@ -198,7 +215,7 @@ class BasicA2AClient:
         client = await self._get_http_client()
         request_payload = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": uuid.uuid4().hex,  # Fresh id per request (Task 5)
             "method": method,
             "params": params,
         }
@@ -209,9 +226,11 @@ class BasicA2AClient:
         data = response.json()
         if "error" in data:
             err = data["error"]
-            raise RuntimeError(
-                f"JSON-RPC error from '{method}': code={err.get('code')} "
-                f"message={err.get('message')!r} data={err.get('data')}"
+            raise A2AJSONRPCError(
+                code=err.get("code", -32603),
+                message=err.get("message", "Unknown JSON-RPC error"),
+                data=err.get("data"),
+                method=method,
             )
         return data.get("result", {})
 
@@ -247,14 +266,56 @@ class BasicA2AClient:
         }
 
     def _map_task_state(self, state: str) -> dict | None:
-        """Map task state to error dict if terminal error state."""
-        if state == "input-required":
+        """Map task state to error dict if terminal error state.
+
+        Accepts both v0.3 (lowercase) and v1.0 (TASK_STATE_*) forms.
+        Returns distinct code+message for each error state.
+        completed/working/submitted/unspecified return None.
+        """
+        # Normalize v1.0 form to lowercase for unified handling
+        normalized = state.lower()
+
+        if normalized in ("task_state_input_required", "input-required"):
             return {"code": -32001, "message": "Task requires additional input"}
-        if state == "failed":
+        if normalized in ("task_state_failed", "failed"):
             return {"code": -32002, "message": "Task failed"}
-        if state == "canceled":
+        if normalized in ("task_state_canceled", "canceled"):
             return {"code": -32003, "message": "Task was canceled"}
+        if normalized in ("task_state_rejected", "rejected"):
+            return {"code": -32004, "message": "Task was rejected"}
+        if normalized in ("task_state_auth_required", "auth-required"):
+            return {"code": -32005, "message": "Authentication required"}
+        # TASK_STATE_COMPLETED, TASK_STATE_WORKING, TASK_STATE_SUBMITTED,
+        # TASK_STATE_UNSPECIFIED, and their v0.3 equivalents return None
         return None
+
+    def _validate_send_result(self, raw_result: dict) -> SendMessageResult:
+        """Validate a raw SendMessage result dict as SendMessageResult.
+
+        Task 2: shared handling for both call_skill and send_message (v1.0 branch).
+        On validation failure, returns a SendMessageResult with a task carrying
+        an error TaskResult - callers check task.error before proceeding.
+
+        Returns:
+            A SendMessageResult. If the raw result was not parseable,
+            task is set to None and error_info is accessible via _send_result_error.
+        """
+        # Use a sentinel to avoid a new return type; store the error for the caller
+        self._last_send_result_error: TaskResult | None = None
+        try:
+            return SendMessageResult.model_validate(raw_result)
+        except Exception as e:
+            self._last_send_result_error = TaskResult(
+                task_id="",
+                error={"code": -32603, "message": f"Failed to parse SendMessage result: {e}"},
+            )
+            return SendMessageResult()
+
+    def _check_send_result_error(self) -> TaskResult | None:
+        """Return the TaskResult error sentinel from _validate_send_result, or None."""
+        result = getattr(self, "_last_send_result_error", None)
+        self._last_send_result_error = None
+        return result
 
     def _flatten_artifacts(self, artifacts: list[Artifact] | list[dict] | None) -> list[Part]:
         """Flatten artifacts into a list of Parts (shared by v1.0 and v0.3)."""
@@ -271,6 +332,16 @@ class BasicA2AClient:
                         all_parts.append(Part.model_validate(p))
         return all_parts
 
+    # Task 5c: _to_task_result and _to_task_result_v03 are kept as separate methods.
+    # Merging them into a single flow would require a shared intermediate structure
+    # that both versions feed into. The only version-specific step is how the raw
+    # payload becomes a common structure: v1.0 uses Pydantic model_validate (Task),
+    # v0.3 uses raw dict manipulation (id→task_id rename). The downstream
+    # artifact-flattening + error-mapping logic is already shared via _flatten_artifacts
+    # and _map_task_state, which both methods call. Merging would mean duplicating
+    # that shared logic in one place or introducing an artificial intermediate type,
+    # so the two methods are kept separate with their respective version-specific
+    # parsing steps documented here.
     def _to_task_result(self, task: Task, task_state: str) -> TaskResult:
         """Convert a v1.0 Task to TaskResult with artifact flattening and error mapping."""
         error_info = self._map_task_state(task_state)
@@ -334,8 +405,21 @@ class BasicA2AClient:
             )
 
         # Convert Task to TaskResult
+        # Task 5b: when a v0.3 Task has no artifacts, fall back to status.message
+        # parts (matching v1.0 _to_task_result behavior)
         artifacts = raw_result.get("artifacts", [])
         all_parts = self._flatten_artifacts(artifacts)
+        if not all_parts:
+            status_msg = raw_result.get("status", {}).get("message")
+            if status_msg and isinstance(status_msg, dict) and status_msg.get("parts"):
+                for p in status_msg["parts"]:
+                    if isinstance(p, dict):
+                        if "text" in p:
+                            all_parts.append(Part(text=p["text"]))
+                        elif "url" in p or "raw" in p:
+                            all_parts.append(Part.model_validate(p))
+                    elif hasattr(p, "model_dump"):
+                        all_parts.append(p)
         output = TaskOutput(parts=all_parts) if all_parts else None
         return TaskResult(
             task_id=task_id,
@@ -382,11 +466,17 @@ class BasicA2AClient:
 
             try:
                 raw_result = await self._rpc("SendMessage", params)
-            except RuntimeError as e:
-                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id="",
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
 
             # v1.0 SendMessage returns either task or message
-            send_result = SendMessageResult.model_validate(raw_result)
+            send_result = self._validate_send_result(raw_result)
+            err = self._check_send_result_error()
+            if err:
+                return err
             if send_result.task:
                 task_state = send_result.task.status.state if send_result.task.status else "unknown"
                 return self._to_task_result(send_result.task, task_state)
@@ -429,8 +519,11 @@ class BasicA2AClient:
             }
             try:
                 raw_result = await self._rpc("message/send", params)
-            except RuntimeError as e:
-                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id="",
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
 
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
@@ -464,9 +557,15 @@ class BasicA2AClient:
             params = {"message": msg.model_dump(by_alias=True, exclude_none=True)}
             try:
                 raw_result = await self._rpc("SendMessage", params)
-            except RuntimeError as e:
-                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
-            send_result = SendMessageResult.model_validate(raw_result)
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id="",
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
+            send_result = self._validate_send_result(raw_result)
+            err = self._check_send_result_error()
+            if err:
+                return err
             if send_result.task:
                 return self._to_task_result(
                     send_result.task,
@@ -486,8 +585,11 @@ class BasicA2AClient:
 
             try:
                 raw_result = await self._rpc("message/send", params)
-            except RuntimeError as e:
-                return TaskResult(task_id="", error={"code": -32601, "message": str(e)})
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id="",
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
             return self._to_task_result_v03(raw_result)
@@ -513,8 +615,11 @@ class BasicA2AClient:
         if self.protocol_version == "1.0":
             try:
                 raw_result = await self._rpc("GetTask", {"id": task_id})
-            except RuntimeError as e:
-                return TaskResult(task_id=task_id, error={"code": -32601, "message": str(e)})
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id=task_id,
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
             # v1.0 GetTask returns {"task": {...}} - extract task before validating
             task_data = raw_result
             if isinstance(raw_result, dict):
@@ -554,8 +659,11 @@ class BasicA2AClient:
         else:
             try:
                 raw_result = await self._rpc("tasks/get", {"id": task_id})
-            except RuntimeError as e:
-                return TaskResult(task_id=task_id, error={"code": -32601, "message": str(e)})
+            except A2AJSONRPCError as e:
+                return TaskResult(
+                    task_id=task_id,
+                    error={"code": e.code, "message": e.message, "data": e.data},
+                )
             if "id" in raw_result and "task_id" not in raw_result:
                 raw_result["task_id"] = raw_result.pop("id")
             try:

@@ -962,3 +962,96 @@ async def test_v10_fake_server_multiple_artifacts():
         # Should return ALL 3 artifacts combined
         assert len(result.output.parts) == 3
         assert [p.text for p in result.output.parts] == ["part 1", "part 2", "part 3"]
+
+
+# ---- Task 1 acceptance tests: _map_task_state handles both v0.3 and v1.0 forms ----
+
+
+def test_map_task_state_v10_completed_no_error():
+    """TASK_STATE_COMPLETED must return None (not an error)."""
+    client = BasicA2AClient("http://unused")
+    assert client._map_task_state("TASK_STATE_COMPLETED") is None
+
+
+def test_map_task_state_v10_working_no_error():
+    """TASK_STATE_WORKING must return None (not an error)."""
+    client = BasicA2AClient("http://unused")
+    assert client._map_task_state("TASK_STATE_WORKING") is None
+
+
+def test_map_task_state_v10_input_required_error():
+    """TASK_STATE_INPUT_REQUIRED must return a distinct error dict."""
+    client = BasicA2AClient("http://unused")
+    result = client._map_task_state("TASK_STATE_INPUT_REQUIRED")
+    assert result is not None
+    assert result["code"] == -32001
+    assert "input" in result["message"].lower()
+
+
+def test_map_task_state_v10_rejected_error():
+    """TASK_STATE_REJECTED must return a distinct error dict with code -32004."""
+    client = BasicA2AClient("http://unused")
+    result = client._map_task_state("TASK_STATE_REJECTED")
+    assert result is not None
+    assert result["code"] == -32004
+
+
+def test_map_task_state_v10_auth_required_error():
+    """TASK_STATE_AUTH_REQUIRED must return a distinct error dict with code -32005."""
+    client = BasicA2AClient("http://unused")
+    result = client._map_task_state("TASK_STATE_AUTH_REQUIRED")
+    assert result is not None
+    assert result["code"] == -32005
+
+
+def test_map_task_state_v03_rejected_error():
+    """v0.3 'rejected' form must also return code -32004 (distinct from failed/canceled)."""
+    client = BasicA2AClient("http://unused")
+    result = client._map_task_state("rejected")
+    assert result is not None
+    assert result["code"] == -32004
+
+
+def test_map_task_state_v03_auth_required_error():
+    """v0.3 'auth-required' form must also return code -32005."""
+    client = BasicA2AClient("http://unused")
+    result = client._map_task_state("auth-required")
+    assert result is not None
+    assert result["code"] == -32005
+
+
+def test_task_status_literal_accepts_v10_states():
+    """TaskStatus.state Literal must accept all TASK_STATE_* values without error."""
+    from llama_index.tools.a2a_tools.models import TaskStatus
+
+    for state in [
+        "TASK_STATE_SUBMITTED",
+        "TASK_STATE_WORKING",
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+        "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED",
+        "TASK_STATE_INPUT_REQUIRED",
+        "TASK_STATE_AUTH_REQUIRED",
+        "TASK_STATE_UNSPECIFIED",
+    ]:
+        ts = TaskStatus(state=state)
+        assert ts.state == state
+
+
+def test_task_status_literal_accepts_v03_states():
+    """TaskStatus.state Literal must accept v0.3 lowercase forms without error."""
+    from llama_index.tools.a2a_tools.models import TaskStatus
+
+    for state in [
+        "submitted",
+        "working",
+        "completed",
+        "failed",
+        "canceled",
+        "rejected",
+        "input-required",
+        "auth-required",
+    ]:
+        ts = TaskStatus(state=state)
+        assert ts.state == state
